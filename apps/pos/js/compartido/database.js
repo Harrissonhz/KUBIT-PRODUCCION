@@ -1417,6 +1417,16 @@ window.DB = (function () {
     }
   };
 
+  function cargarLinkTienda() {
+    var link = document.getElementById('link-tienda-virtual');
+    if (!link) return;
+    configuracionEmpresa.obtener().then(function (res) {
+      if (res.data && res.data.store_url) {
+        link.href = res.data.store_url;
+      }
+    }).catch(function () {});
+  }
+
   /* ════════════════════════════════════════════════════════════
       API PUBLICA
       ════════════════════════════════════════════════════════════ */
@@ -1450,7 +1460,8 @@ window.DB = (function () {
     finanzasMensuales: finanzasMensuales,
     configuracionEmpresa: configuracionEmpresa,
     roles: roles,
-    usuarios: usuarios
+    usuarios: usuarios,
+    cargarLinkTienda: cargarLinkTienda
   };
 })();
 
@@ -1485,27 +1496,6 @@ window.DB = (function () {
     document.addEventListener('DOMContentLoaded', cargarLogoHeader);
   } else {
     cargarLogoHeader();
-  }
-})();
-
-/* ════════════════════════════════════════════════════════════
-    AUTO: Cargar link de tienda virtual en el sidebar
-    Busca #link-tienda-virtual y asigna href desde store_url
-    ════════════════════════════════════════════════════════════ */
-(function () {
-  function cargarLinkTienda() {
-    var link = document.getElementById('link-tienda-virtual');
-    if (!link) return;
-    DB.configuracionEmpresa.obtener().then(function (res) {
-      if (res.data && res.data.store_url) {
-        link.href = res.data.store_url;
-      }
-    }).catch(function () {});
-  }
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', cargarLinkTienda);
-  } else {
-    cargarLinkTienda();
   }
 })();
 

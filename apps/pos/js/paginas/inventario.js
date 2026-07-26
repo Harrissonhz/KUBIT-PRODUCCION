@@ -6,6 +6,7 @@
   var PAGE_SIZE = 10;
   var PAGINA_INV = 1;
   var PAGINA_MOV = 1;
+  var FILTRO_RESUMEN = null;
 
   var $ = function (id) { return document.getElementById(id); };
   var html = document.documentElement;
@@ -59,15 +60,31 @@
     $('stat-con-stock').textContent = conStock;
     $('stat-stock-bajo').textContent = stockBajo;
     $('stat-agotados').textContent = agotados;
+    if (!window._resumenHandlersAttached) {
+      document.querySelectorAll('[data-stat]').forEach(function (card) {
+        card.addEventListener('click', function () {
+          aplicarFiltroResumen(card.dataset.stat);
+        });
+      });
+      window._resumenHandlersAttached = true;
+    }
   }
 
   /* ════════════════════════════════════════
      FILTER + PAGINATION: Existencias
      ════════════════════════════════════════ */
   function obtenerListaFiltrada() {
+    var lista = PRODUCTOS_DETALLE;
+    if (FILTRO_RESUMEN === 'con_stock') {
+      lista = lista.filter(function (d) { return (d.stock_actual || 0) > 10; });
+    } else if (FILTRO_RESUMEN === 'stock_bajo') {
+      lista = lista.filter(function (d) { return (d.stock_actual || 0) > 0 && (d.stock_actual || 0) <= 10; });
+    } else if (FILTRO_RESUMEN === 'agotados') {
+      lista = lista.filter(function (d) { return (d.stock_actual || 0) === 0; });
+    }
     var q = ($('buscador').value || '').toLowerCase().trim();
-    if (!q) return PRODUCTOS_DETALLE;
-    return PRODUCTOS_DETALLE.filter(function (d) {
+    if (!q) return lista;
+    return lista.filter(function (d) {
       var p = d.producto || {};
       return (p.nombre || '').toLowerCase().includes(q) ||
              (d.codigo_interno || '').toLowerCase().includes(q);
@@ -147,6 +164,39 @@
   function filtrarYRenderInventario() {
     PAGINA_INV = 1;
     renderizarTablaInventario();
+  }
+
+  function aplicarFiltroResumen(tipo) {
+    if (FILTRO_RESUMEN === tipo) {
+      FILTRO_RESUMEN = null;
+    } else {
+      FILTRO_RESUMEN = tipo;
+    }
+    actualizarFiltroUI();
+    PAGINA_INV = 1;
+    renderizarTablaInventario();
+    $('buscador').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function actualizarFiltroUI() {
+    var cards = document.querySelectorAll('[data-stat]');
+    cards.forEach(function (card) {
+      var tipo = card.dataset.stat;
+      card.classList.remove('ring-2', 'ring-slate-400/50', 'ring-emerald-400/50', 'ring-amber-400/50', 'ring-red-400/50');
+      if (FILTRO_RESUMEN === tipo) {
+        var ringMap = { total: 'ring-slate-400/50', con_stock: 'ring-emerald-400/50', stock_bajo: 'ring-amber-400/50', agotados: 'ring-red-400/50' };
+        card.classList.add('ring-2', ringMap[tipo]);
+      }
+    });
+    var pill = $('filtro-activo');
+    var label = $('filtro-activo-label');
+    if (FILTRO_RESUMEN && FILTRO_RESUMEN !== 'total') {
+      var labelMap = { con_stock: 'Con Stock', stock_bajo: 'Stock Bajo', agotados: 'Agotados' };
+      label.textContent = labelMap[FILTRO_RESUMEN] || '';
+      pill.classList.remove('hidden');
+    } else {
+      pill.classList.add('hidden');
+    }
   }
 
   /* ════════════════════════════════════════
@@ -296,6 +346,12 @@
     });
 
     $('btn-aplicar-ajuste').addEventListener('click', aplicarAjuste);
+    $('btn-limpiar-filtro').addEventListener('click', function () {
+      FILTRO_RESUMEN = null;
+      actualizarFiltroUI();
+      PAGINA_INV = 1;
+      renderizarTablaInventario();
+    });
     bindearBuscadorProducto();
   }
 

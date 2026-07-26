@@ -190,6 +190,7 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 | Tendencia de Ventas (multi-year line chart) | El grafico "Tendencia de Ventas" usa `DB.ventas.todosLosAnios()` que consulta `pos_finanzas_mensuales` completo. Una linea por ano con `spanGaps:false` (null en meses sin datos). Paleta progresiva slate (mas antiguo) → sky → emerald (mas reciente). Tabla resumen con total, crecimiento %, promedio mensual y barra visual. |
 | Rango de anos en dropdowns | `filtro-anio`, `chart-anio`, `comp-anio1`, `comp-anio2` generados con `for (a = anioAct + 1; a >= 2023; a--)`. Incluye 2023 porque hay datos desde Sep 2023. |
 | Recepcion de Compras solo via flujo recibir() | El estado "RECIBIDA" NO debe asignarse directamente via dropdown `campo-estado` + PATCH. El unico camino valido es mediante `DB.comprasDetalle.recibir()` que crea movimiento de inventario (`entrada_compra`), actualiza `stock_actual` en `pos_productos_detalle` y establece `cantidad_recibida`. Ver `compras.js::guardar()` que ahora detecta cambio a RECIBIDA y auto-ejecuta recibir() para cada item pendiente. |
+| Smart Stats Filter (Inventario) | Las 4 cards del Resumen de Inventario (Total Productos, Con Stock, Stock Bajo, Agotados) son clickeables con `data-stat` y actuan como filtro AND con el buscador de texto sobre la tabla de Existencias Actuales. Click en una card activa el filtro con `ring-2` del color correspondiente. Click en la misma card o en el pill `✕` lo desactiva. `FILTRO_RESUMEN` es la variable de estado. `aplicarFiltroResumen()` y `actualizarFiltroUI()` manejan la logica. Sin cambios en DB — todo client-side sobre `PRODUCTOS_DETALLE`. |
 
 ---
 
@@ -516,6 +517,12 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 - [x] **Bug #1 (Raiz):** `compras.js::guardar()` ahora detecta cuando `estado === 'RECIBIDA'` y ejecuta automaticamente `DB.comprasDetalle.recibir()` para cada item pendiente. Antes el dropdown `campo-estado` permitia marcar RECIBIDA via simple PATCH, saltandose la creacion de movimiento de inventario, actualizacion de `stock_actual` y asignacion de `cantidad_recibida`.
 - [x] **Bug #2:** `database.js::recibir()` agregado `incluirEliminados: true` en el query a `pos_productos_detalle`. Sin esto, si la variante estaba soft-deleted, el stock update se saltaba silenciosamente (el `select()` helper agrega `deleted_at=is.null` por defecto).
 - [x] **Bug #3:** `database.js::recibir()` agregado `_cacheClear('productos')` antes del return para que el cache de productos no quede con `stock_actual` desactualizado.
+- [x] `npm test` → 105 passed, 0 failures
+
+#### Modulo POS — Fase 28: Smart Stats Filter (Filtro Interactivo en Inventario)
+- [x] `inventario.html` — Cards de resumen ahora con `data-stat`, `cursor-pointer`, `hover:ring-2`, IDs unicos (`#card-stat-*`). Nuevo contenedor `#filtro-activo` con pill de filtro y boton `✕` entre buscador y tabla de existencias.
+- [x] `inventario.js` — Nueva variable `FILTRO_RESUMEN` (null | 'con_stock' | 'stock_bajo' | 'agotados'). `obtenerListaFiltrada()` aplica AND entre filtro de resumen y texto. `aplicarFiltroResumen(tipo)` (toggle ON/OFF + paginacion reset + smooth scroll). `actualizarFiltroUI()` (ring-2 color en card activa, show/hide pill con label). Click handlers adjuntados una sola vez en `renderizarResumen()` via flag `window._resumenHandlersAttached`. Boton `#btn-limpiar-filtro` limpia filtro y re-renderiza.
+- [x] Sin cambios en DB — todo client-side sobre `PRODUCTOS_DETALLE`.
 - [x] `npm test` → 105 passed, 0 failures
 
 ### 7.4 Próximo Paso Recomendado
@@ -1154,6 +1161,8 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 | incluirEliminados en recibir | `database.js::recibir()` usa `incluirEliminados: true` para encontrar variantes soft-deleted. Si se omite, `select()` helper agrega `deleted_at=is.null` y el stock update se salta. |
 | cacheClear post-recepcion | `database.js::recibir()` ahora hace `_cacheClear('productos')` para que el stock actualizado se refleje inmediatamente en el POS. |
 | Bug: estado RECIBIDA sin stock update | Si una orden de compra tiene `estado=RECIBIDA` pero `cantidad_recibida=0`, es porque se marco via dropdown saltando `recibir()`. Solucion: ejecutar "Recibir Todo" en la UI o editar y guardar con RECIBIDA (el fix auto-ejecuta recibir). |
+| Smart Stats Filter | `inventario.js::FILTRO_RESUMEN`, `aplicarFiltroResumen()`, `actualizarFiltroUI()`, `data-stat`, `#card-stat-*`, `#filtro-activo`. Cards de resumen clickeables filtran tabla de Existencias Actuales con AND logico + buscador. Todo client-side sobre `PRODUCTOS_DETALLE`. |
+| Filtro interactivo inventario | `inventario.html` cards con `data-stat="total|con_stock|stock_bajo|agotados"`, `cursor-pointer`, `ring-2` al activarse. Pill `#filtro-activo` con label y boton `✕` para limpiar. |
 
 ## 13. Registro de Cambios (continuacion)
 
@@ -1378,6 +1387,16 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 | `apps/pos/js/paginas/panel.js` | Fix critico: eliminada linea `labelAnio.textContent = anio` que borraba los `<option>` del `<select id="ivg-anio">` (reliquia de cuando era `<span>`). |
 | `apps/pos/service-worker.js` | Cache version bumped: `kubit-pos-20260619-01` → `kubit-pos-20260713-01`. `panel.html` y `js/paginas/panel.js` agregados al precache ASSETS. |
 | `AGENTS.md` | Seccion 5: 4 nuevas decisiones (grafico IVG, calculo gastos+costos, textContent en select, SW precache). Seccion 7.2: Fase 25. Seccion 11: 4 nuevas keywords. |
+| `npm test` | 105 passed, 0 failures |
+
+### 2026-07-26 — Smart Stats Filter (Fase 28)
+
+| Archivo | Cambio |
+|---|---|
+| `apps/pos/inventario.html` | Cards de resumen con `data-stat`, `cursor-pointer`, `hover:ring-2`, `id="card-stat-*"`. Nuevo `#filtro-activo` con pill y boton `✕` entre buscador y tabla. |
+| `apps/pos/js/paginas/inventario.js` | `FILTRO_RESUMEN`, `obtenerListaFiltrada()` con AND logico, `aplicarFiltroResumen()` (toggle + scroll), `actualizarFiltroUI()` (ring-2 + pill), `_resumenHandlersAttached` flag, `#btn-limpiar-filtro` handler. |
+| `specs/03-pos-spec.md` | Nueva subseccion 3.3.4 documentando Smart Stats Filter. |
+| `AGENTS.md` | Seccion 5: decision de diseno Smart Stats Filter. Seccion 7.2: Fase 28. Seccion 11: 2 nuevas keywords. |
 | `npm test` | 105 passed, 0 failures |
 
 ### 2026-07-20 — Rentabilidad TOTAL (Fase 26)

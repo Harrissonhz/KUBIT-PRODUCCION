@@ -145,6 +145,9 @@ window.KubitAuth = (function () {
       USUARIO_ACTUAL = s;
     }
     poblarUserHeader();
+    if (typeof DB !== 'undefined' && DB.cargarLinkTienda) {
+      DB.cargarLinkTienda();
+    }
     return USUARIO_ACTUAL;
   }
 

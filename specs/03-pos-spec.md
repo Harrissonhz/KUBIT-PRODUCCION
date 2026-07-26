@@ -643,6 +643,38 @@ Cuando `stock_actual <= stock_min`, el sistema debe:
 - Mostrar una alerta visual en la interfaz de ventas
 - Notificar en el dashboard principal
 
+#### 3.3.4 Smart Stats Filter (Filtro Interactivo de Resumen)
+Las 4 cards del Resumen de Inventario en la pagina `inventario.html` funcionan como filtros interactivos para la tabla de Existencias Actuales.
+
+| Card | `data-stat` | Criterio de filtro | Color ring activo |
+|---|---|---|---|
+| Total Productos | `total` | Sin filtro (muestra todos) | slate-400/50 |
+| Con Stock | `con_stock` | `stock_actual > 10` | emerald-400/50 |
+| Stock Bajo | `stock_bajo` | `stock_actual > 0` y `stock_actual <= 10` | amber-400/50 |
+| Agotados | `agotados` | `stock_actual === 0` | red-400/50 |
+
+**Comportamiento:**
+1. Click en una card activa el filtro: la card se resalta con `ring-2` del color correspondiente
+2. Aparece un pill "Filtrando: [label]" con boton `✕` entre el buscador y la tabla
+3. El filtro se combina con el buscador de texto via **AND logico** (interseccion)
+4. Click en la misma card desactiva el filtro (toggle)
+5. Click en `✕` limpia el filtro
+6. Al activar/desactivar, el scroll va suavemente a la seccion de existencias
+7. La paginacion se resetea a pagina 1 al cambiar el filtro
+
+**Arquitectura:**
+- Variable de estado: `FILTRO_RESUMEN` (null | 'total' | 'con_stock' | 'stock_bajo' | 'agotados')
+- `obtenerListaFiltrada()` aplica el filtro de resumen PRIMERO, luego el filtro de texto
+- `aplicarFiltroResumen(tipo)` cambia el estado y re-renderiza
+- `actualizarFiltroUI()` maneja el aspecto visual (ring + pill)
+- Los click handlers se adjuntan una sola vez via flag `window._resumenHandlersAttached`
+- Sin cambios en base de datos — todo es client-side sobre `PRODUCTOS_DETALLE`
+
+**Archivos involucrados:**
+- `apps/pos/inventario.html` — IDs `#card-stat-*`, atributos `data-stat`
+- `apps/pos/js/paginas/inventario.js` — Funciones y variables de filtro
+- Sin cambios en estilos (todo Tailwind)
+
 ### 3.4 Compras
 
 #### 3.4.1 Estados de una Orden de Compra
