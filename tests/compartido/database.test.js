@@ -941,7 +941,7 @@ describe('DB.compras.totalDelMes', function () {
 
     expect(resultado).toBe(229572);
     var url = decodeURIComponent(window.__supabase.get.mock.calls[0][0]);
-    expect(url).toContain('estado=in.(RECIBIDA,PENDIENTE)');
+    expect(url).toContain('estado=in.(RECIBIDA,RECIBIENDO,PENDIENTE)');
     expect(url).toContain('deleted_at=is.null');
     expect(url).toContain('fecha_compra=gte.2026-06-01');
     expect(url).toContain('fecha_compra=lt.2026-07-01');

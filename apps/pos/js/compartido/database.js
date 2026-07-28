@@ -892,7 +892,7 @@ window.DB = (function () {
         var desde = a + '-' + String(m).padStart(2, '0') + '-01T00:00:00';
         var hasta = sigAnio + '-' + String(sigMes).padStart(2, '0') + '-01T00:00:00';
         var data = await api.get('pos_compras?select=total' +
-          '&estado=in.(RECIBIDA,PENDIENTE)' +
+          '&estado=in.(RECIBIDA,RECIBIENDO,PENDIENTE)' +
           '&deleted_at=is.null' +
           '&fecha_compra=gte.' + desde +
           '&fecha_compra=lt.' + hasta);
