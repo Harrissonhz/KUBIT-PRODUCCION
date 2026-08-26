@@ -946,6 +946,8 @@ window.DB = (function () {
         });
         if (updRes.error) return updRes;
 
+        // Politica estricta: si el movimiento de inventario falla, se revierte
+        // el detalle para no dejar una recepcion "fantasma" sin inventario
         var movRes = await insert('pos_movimientos_inventario', {
           producto_detalle_id: detalle.producto_detalle_id,
           tipo_movimiento: 'entrada_compra',
@@ -956,6 +958,15 @@ window.DB = (function () {
         });
         if (movRes.error) {
           console.error('[DB] Error al crear movimiento inventario:', movRes.error);
+          var revDet = await update('pos_compras_detalle', id, {
+            cantidad_recibida: detalle.cantidad_recibida || 0,
+            estado_detalle: (parseInt(detalle.cantidad_recibida || 0)) >= detalle.cantidad ? 'RECIBIDO' : 'PENDIENTE',
+            updated_by: usuarioId
+          });
+          if (revDet.error) {
+            console.error('[DB] CRITICO: no se pudo revertir el detalle tras fallo de movimiento:', revDet.error);
+          }
+          return { data: null, error: 'Fallo al registrar movimiento de inventario: ' + movRes.error + '. Recepcion revertida, intente de nuevo.' };
         }
 
         var detActual = await select('pos_productos_detalle', {
@@ -965,11 +976,44 @@ window.DB = (function () {
         });
         if (detActual.data && detActual.data.length) {
           var stockActual = parseInt(detActual.data[0].stock_actual || 0);
-          await update('pos_productos_detalle', detalle.producto_detalle_id, {
+          var stockUpd = await update('pos_productos_detalle', detalle.producto_detalle_id, {
             stock_actual: stockActual + cantidad
           });
+          if (stockUpd.error) {
+            console.error('[DB] Error al actualizar stock:', stockUpd.error);
+            // Politica estricta: eliminar movimiento creado y revertir detalle
+            var movId = movRes.data && (Array.isArray(movRes.data) ? movRes.data[0].id : movRes.data.id);
+            if (movId) {
+              var delMov = await api.delete('pos_movimientos_inventario?id=eq.' + movId);
+              if (delMov && delMov.error) console.error('[DB] CRITICO: no se pudo eliminar el movimiento huerfano:', delMov.error);
+            }
+            var revDet2 = await update('pos_compras_detalle', id, {
+              cantidad_recibida: detalle.cantidad_recibida || 0,
+              estado_detalle: (parseInt(detalle.cantidad_recibida || 0)) >= detalle.cantidad ? 'RECIBIDO' : 'PENDIENTE',
+              updated_by: usuarioId
+            });
+            if (revDet2.error) {
+              console.error('[DB] CRITICO: no se pudo revertir el detalle tras fallo de stock:', revDet2.error);
+            }
+            return { data: null, error: 'Fallo al actualizar stock: ' + stockUpd.error + '. Recepcion revertida, intente de nuevo.' };
+          }
+        } else {
+          console.error('[DB] Variante no encontrada para actualizar stock:', detalle.producto_detalle_id);
+          var movId2 = movRes.data && (Array.isArray(movRes.data) ? movRes.data[0].id : movRes.data.id);
+          if (movId2) await api.delete('pos_movimientos_inventario?id=eq.' + movId2);
+          await update('pos_compras_detalle', id, {
+            cantidad_recibida: detalle.cantidad_recibida || 0,
+            estado_detalle: (parseInt(detalle.cantidad_recibida || 0)) >= detalle.cantidad ? 'RECIBIDO' : 'PENDIENTE',
+            updated_by: usuarioId
+          });
+          return { data: null, error: 'Variante de producto no encontrada. Recepcion revertida.' };
         }
 
+        var advertencias = [];
+        // Nota: checkTodos usa el filtro default (deleted_at=is.null) a proposito:
+        // las filas soft-deleted ya no hacen parte de la orden, por lo que NO deben
+        // bloquear el paso a RECIBIDA (a diferencia del lookup de variante, que si
+        // usa incluirEliminados porque el stock debe actualizarse siempre).
         var checkTodos = await select('pos_compras_detalle', {
           select: 'id,estado_detalle',
           filters: [{ col: 'compra_id', val: detalle.compra_id }]
@@ -978,10 +1022,20 @@ window.DB = (function () {
           var todosRecibidos = checkTodos.data.every(function (d) { return d.estado_detalle === 'RECIBIDO'; });
           var algunRecibido = checkTodos.data.some(function (d) { return d.estado_detalle === 'RECIBIDO'; });
           if (todosRecibidos) {
-            await update('pos_compras', detalle.compra_id, { estado: 'RECIBIDA' });
+            var resEst1 = await update('pos_compras', detalle.compra_id, { estado: 'RECIBIDA' });
+            if (resEst1.error) {
+              console.error('[DB] Error al marcar compra RECIBIDA:', resEst1.error);
+              advertencias.push('No se pudo actualizar el estado de la orden a RECIBIDA');
+            }
           } else if (algunRecibido) {
-            await update('pos_compras', detalle.compra_id, { estado: 'RECIBIENDO' });
+            var resEst2 = await update('pos_compras', detalle.compra_id, { estado: 'RECIBIENDO' });
+            if (resEst2.error) {
+              console.error('[DB] Error al marcar compra RECIBIENDO:', resEst2.error);
+              advertencias.push('No se pudo actualizar el estado de la orden a RECIBIENDO');
+            }
           }
+        } else if (checkTodos.error) {
+          advertencias.push('No se pudo verificar el estado de la orden');
         }
 
         var compraActualizada = await select('pos_compras', {
@@ -995,7 +1049,8 @@ window.DB = (function () {
         return {
           data: {
             detalle: { id: id, cantidad_recibida: nuevaRecibida, estado_detalle: nuevoEstadoDet },
-            compra: compraActualizada.data && compraActualizada.data[0] || null
+            compra: compraActualizada.data && compraActualizada.data[0] || null,
+            advertencias: advertencias
           },
           error: null
         };

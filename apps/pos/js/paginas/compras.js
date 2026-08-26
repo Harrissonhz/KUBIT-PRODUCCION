@@ -8,6 +8,7 @@
   var CATALOGO = [];
   var CATALOGO_FILTRADO = [];
   var EDITANDO_ID = null;
+  var EDITANDO_ESTADO = null;
   var _guardando = false;
   var PAGE_SIZE = 10;
   var PAGINA = 1;
@@ -313,7 +314,11 @@
 
       renderizarDetalle();
       await cargarCompras();
-      mostrarToast('Recepcion registrada (' + cantidad + ' unidades)');
+      if (res.data && res.data.advertencias && res.data.advertencias.length) {
+        mostrarToast('Recepcion registrada con advertencia: ' + res.data.advertencias[0]);
+      } else {
+        mostrarToast('Recepcion registrada (' + cantidad + ' unidades)');
+      }
     } catch (e) {
       console.error('[Compras] Error al recibir:', e);
       mostrarToast('Error inesperado');
@@ -334,6 +339,7 @@
     var user = window.KubitAuth.obtenerUsuario();
     var userId = user ? user.id : null;
     var errores = 0;
+    var _advertencias = [];
 
     for (var i = 0; i < pendientes.length; i++) {
       var d = pendientes[i];
@@ -344,6 +350,9 @@
         console.error('[Compras] Error recibir item:', d._detalle_db_id, res.error);
         errores++;
       } else {
+        if (res.data && res.data.advertencias) {
+          res.data.advertencias.forEach(function (a) { _advertencias.push(a); });
+        }
         d.cantidad_recibida = (parseInt(d.cantidad_recibida || 0) + pendiente);
         if (d.cantidad_recibida >= d.cantidad) d.estado_detalle = 'RECIBIDO';
         if (res.data && res.data.compra) {
@@ -356,6 +365,7 @@
     renderizarDetalle();
     await cargarCompras();
     if (errores) mostrarToast(errores + ' error(es) al recibir');
+    else if (_advertencias.length) mostrarToast('Items recibidos con advertencia: ' + _advertencias[0]);
     else mostrarToast('Todos los items recibidos');
   }
 
@@ -517,6 +527,7 @@
 
   async function limpiarFormulario() {
     EDITANDO_ID = null;
+    EDITANDO_ESTADO = null;
     DETALLE = [];
     $('form-titulo').textContent = 'Nueva Orden de Compra';
     $('form-compra-id').textContent = '';
@@ -536,6 +547,7 @@
     var c = COMPRAS.find(function (x) { return x.id === id; });
     if (!c) return;
     EDITANDO_ID = id;
+    EDITANDO_ESTADO = c.estado || 'PENDIENTE';
     $('form-titulo').textContent = 'Editar Orden #' + (c.numero_orden || '');
     $('form-compra-id').textContent = c.proveedor ? c.proveedor.razon_social : '';
     $('campo-proveedor').value = c.proveedor_id || '';
@@ -627,6 +639,23 @@
 
       var res;
       if (EDITANDO_ID) {
+        // Proteccion de estado: recalcular desde los detalles reales para no
+        // revertir recepciones ya registradas (ej. dropdown quedo en PENDIENTE)
+        var _recibidos = DETALLE.filter(function (d) {
+          return d._detalle_db_id && d.estado_detalle === 'RECIBIDO';
+        }).length;
+        var _totalDb = DETALLE.filter(function (d) { return d._detalle_db_id; }).length;
+        var _estadoCalc = 'PENDIENTE';
+        if (_totalDb > 0 && _recibidos === _totalDb) _estadoCalc = 'RECIBIDA';
+        else if (_recibidos > 0) _estadoCalc = 'RECIBIENDO';
+
+        var _jerarquia = { PENDIENTE: 0, CONFIRMADA: 1, RECIBIENDO: 2, RECIBIDA: 3 };
+        if (data.estado === 'PENDIENTE' && (_jerarquia[_estadoCalc] || 0) > 0) {
+          data.estado = _estadoCalc;
+          $('campo-estado').value = _estadoCalc;
+          mostrarToast('Estado ajustado a ' + _estadoCalc + ': hay items recibidos en DB');
+        }
+
         res = await DB.compras.actualizar(EDITANDO_ID, data);
         if (res.error) { mostrarToast('Error: ' + res.error); _guardando = false; $('btn-guardar').disabled = false; $('btn-guardar').textContent = 'Guardar Compra'; return; }
 
@@ -662,11 +691,19 @@
           });
           if (_pendItems.length) {
             var _usr = window.KubitAuth.obtenerUsuario();
+            var _erroresRecibir = 0;
             for (var _p = 0; _p < _pendItems.length; _p++) {
               var _pend = parseInt(_pendItems[_p].cantidad || 1) - parseInt(_pendItems[_p].cantidad_recibida || 0);
               if (_pend > 0) {
-                await DB.comprasDetalle.recibir(_pendItems[_p]._detalle_db_id, _pend, _usr ? _usr.id : null);
+                var _resRec = await DB.comprasDetalle.recibir(_pendItems[_p]._detalle_db_id, _pend, _usr ? _usr.id : null);
+                if (_resRec.error) {
+                  console.error('[Compras] Error en auto-recepcion:', _resRec.error);
+                  _erroresRecibir++;
+                }
               }
+            }
+            if (_erroresRecibir) {
+              mostrarToast(_erroresRecibir + ' item(s) no pudieron recibirse: ' + 'revise la orden e intente recibirlos manualmente');
             }
           }
         }

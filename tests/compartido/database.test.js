@@ -1003,3 +1003,166 @@ describe('DB.gastos.totalDelMes', function () {
   });
 
 });
+
+// ═══════════════════════════════════════════════════════════════
+// DB.comprasDetalle.recibir — Politica estricta (Fase 29)
+// ═══════════════════════════════════════════════════════════════
+
+function mockRecepcionFeliz() {
+  window.__supabase.get
+    .mockResolvedValueOnce([{
+      id: 'd-1', compra_id: 'c-1', producto_detalle_id: 'pd-1',
+      cantidad: 5, cantidad_recibida: 0,
+      compra: { numero_orden: 64 }
+    }])
+    .mockResolvedValueOnce([{ id: 'pd-1', stock_actual: 12 }])
+    .mockResolvedValueOnce([{ id: 'd-1', estado_detalle: 'RECIBIDO' }])
+    .mockResolvedValueOnce([{ id: 'c-1', estado: 'RECIBIDA', proveedor: { razon_social: 'Proveedor X' } }]);
+  window.__supabase.post.mockResolvedValue([{ id: 'mov-1' }]);
+  window.__supabase.patch.mockResolvedValue([{ id: 'ok' }]);
+}
+
+describe('DB.comprasDetalle.recibir', function () {
+
+  it('happy path total: actualiza detalle, movimiento, stock y marca RECIBIDA', async function () {
+    mockRecepcionFeliz();
+
+    var res = await DB.comprasDetalle.recibir('d-1', 5, 'usr-1');
+
+    expect(res.error).toBeNull();
+    expect(res.data.detalle).toEqual({ id: 'd-1', cantidad_recibida: 5, estado_detalle: 'RECIBIDO' });
+    expect(res.data.advertencias).toEqual([]);
+
+    // Movimiento de inventario creado con datos correctos
+    expect(window.__supabase.post).toHaveBeenCalledTimes(1);
+    expect(window.__supabase.post.mock.calls[0][0]).toBe('pos_movimientos_inventario');
+    var movBody = window.__supabase.post.mock.calls[0][1];
+    expect(movBody.tipo_movimiento).toBe('entrada_compra');
+    expect(movBody.cantidad).toBe(5);
+    expect(movBody.referencia).toBe('OC-64');
+    expect(movBody.producto_detalle_id).toBe('pd-1');
+
+    // Stock incrementado (12 + 5 = 17)
+    var patchStock = window.__supabase.patch.mock.calls.find(function (c) {
+      return c[0] === 'pos_productos_detalle?id=eq.pd-1';
+    });
+    expect(patchStock).toBeDefined();
+    expect(patchStock[1].stock_actual).toBe(17);
+
+    // Compra marcada RECIBIDA
+    var patchCompra = window.__supabase.patch.mock.calls.find(function (c) {
+      return c[0] === 'pos_compras?id=eq.c-1';
+    });
+    expect(patchCompra).toBeDefined();
+    expect(patchCompra[1].estado).toBe('RECIBIDA');
+  });
+
+  it('recepcion parcial: detalle queda PENDIENTE y compra pasa a RECIBIENDO', async function () {
+    window.__supabase.get
+      .mockResolvedValueOnce([{
+        id: 'd-2', compra_id: 'c-2', producto_detalle_id: 'pd-2',
+        cantidad: 10, cantidad_recibida: 0,
+        compra: { numero_orden: 61 }
+      }])
+      .mockResolvedValueOnce([{ id: 'pd-2', stock_actual: 3 }])
+      .mockResolvedValueOnce([
+        { id: 'd-2', estado_detalle: 'PENDIENTE' },
+        { id: 'd-3', estado_detalle: 'RECIBIDO' }
+      ])
+      .mockResolvedValueOnce([{ id: 'c-2', estado: 'RECIBIENDO', proveedor: {} }]);
+    window.__supabase.post.mockResolvedValue([{ id: 'mov-2' }]);
+    window.__supabase.patch.mockResolvedValue([{ id: 'ok' }]);
+
+    var res = await DB.comprasDetalle.recibir('d-2', 4, null);
+
+    expect(res.error).toBeNull();
+    expect(res.data.detalle.cantidad_recibida).toBe(4);
+    expect(res.data.detalle.estado_detalle).toBe('PENDIENTE');
+
+    var patchCompra = window.__supabase.patch.mock.calls.find(function (c) {
+      return c[0] === 'pos_compras?id=eq.c-2';
+    });
+    expect(patchCompra).toBeDefined();
+    expect(patchCompra[1].estado).toBe('RECIBIENDO');
+  });
+
+  it('politica estricta: si el movimiento falla, revierte el detalle y retorna error', async function () {
+    window.__supabase.get
+      .mockResolvedValueOnce([{
+        id: 'd-1', compra_id: 'c-1', producto_detalle_id: 'pd-1',
+        cantidad: 5, cantidad_recibida: 0,
+        compra: { numero_orden: 64 }
+      }]);
+    // patch #1 (update detalle) OK, patch #2 (revertir) OK
+    window.__supabase.patch.mockResolvedValue([{ id: 'ok' }]);
+    window.__supabase.post.mockRejectedValue(new Error('Supabase 403: RLS violation'));
+
+    var res = await DB.comprasDetalle.recibir('d-1', 5, 'usr-1');
+
+    // Retorna error visible al usuario
+    expect(res.error).toContain('Fallo al registrar movimiento de inventario');
+    expect(res.error).toContain('revertida');
+    expect(res.data).toBeNull();
+
+    // El detalle se revirtio a sus valores previos (cantidad_recibida 0, PENDIENTE)
+    var patchRevert = window.__supabase.patch.mock.calls[1];
+    expect(patchRevert[0]).toBe('pos_compras_detalle?id=eq.d-1');
+    expect(patchRevert[1]).toEqual({
+      cantidad_recibida: 0,
+      estado_detalle: 'PENDIENTE',
+      updated_by: 'usr-1'
+    });
+
+    // No se toco el stock ni el estado de la compra
+    var patchStock = window.__supabase.patch.mock.calls.find(function (c) {
+      return c[0] === 'pos_productos_detalle?id=eq.pd-1';
+    });
+    expect(patchStock).toBeUndefined();
+  });
+
+  it('politica estricta: si el update de stock falla, elimina el movimiento y revierte', async function () {
+    window.__supabase.get
+      .mockResolvedValueOnce([{
+        id: 'd-1', compra_id: 'c-1', producto_detalle_id: 'pd-1',
+        cantidad: 5, cantidad_recibida: 0,
+        compra: { numero_orden: 64 }
+      }])
+      .mockResolvedValueOnce([{ id: 'pd-1', stock_actual: 12 }]);
+    window.__supabase.post.mockResolvedValue([{ id: 'mov-9' }]);
+    // patch #1 (detalle) OK; patch #2 (stock) FALLA; patch #3 (revertir) OK
+    window.__supabase.patch
+      .mockResolvedValueOnce([{ id: 'ok' }])
+      .mockRejectedValueOnce(new Error('Supabase 500: Internal Error'))
+      .mockResolvedValueOnce([{ id: 'ok' }]);
+
+    var res = await DB.comprasDetalle.recibir('d-1', 5, 'usr-1');
+
+    expect(res.error).toContain('Fallo al actualizar stock');
+    expect(res.data).toBeNull();
+
+    // El movimiento huerfano fue eliminado
+    expect(window.__supabase.delete).toHaveBeenCalledWith(
+      'pos_movimientos_inventario?id=eq.mov-9'
+    );
+
+    // El detalle quedo en sus valores previos
+    var patchRevert = window.__supabase.patch.mock.calls[2];
+    expect(patchRevert[0]).toBe('pos_compras_detalle?id=eq.d-1');
+    expect(patchRevert[1].cantidad_recibida).toBe(0);
+  });
+
+  it('rechaza recibir mas de lo ordenado', async function () {
+    window.__supabase.get.mockResolvedValueOnce([{
+      id: 'd-1', compra_id: 'c-1', producto_detalle_id: 'pd-1',
+      cantidad: 5, cantidad_recibida: 4,
+      compra: { numero_orden: 64 }
+    }]);
+
+    var res = await DB.comprasDetalle.recibir('d-1', 2, null);
+
+    expect(res.error).toBe('Cantidad a recibir excede lo ordenado');
+    expect(window.__supabase.patch).not.toHaveBeenCalled();
+    expect(window.__supabase.post).not.toHaveBeenCalled();
+  });
+
+});

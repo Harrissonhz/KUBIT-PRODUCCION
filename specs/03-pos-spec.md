@@ -713,6 +713,27 @@ PENDIENTE → CONFIRMADA → RECIBIDA → (opcional) ANULADA
 - Si la cantidad a recibir supera la cantidad ordenada, `recibir()` retorna error
 - No se permite editar una orden ya recibida (el estado RECIBIDA se bloquea en el flujo normal)
 
+#### 3.4.4 Politica Estricta de Recepcion (Fase 29)
+
+**Problema detectado en produccion (2026-08-25, OC #63/#64):**
+
+1. **Estado revertido:** Al editar una orden y presionar "Guardar Compra" despues de haber recibido items via modal, el dropdown `#campo-estado` (que conserva el valor cargado al abrir el formulario) parcheaba `pos_compras.estado` de vuelta a `PENDIENTE`, aunque los detalles ya estuvieran `RECIBIDO` en DB. La orden #63 quedo atascada en PENDIENTE con 7/7 items recibidos.
+2. **Recepcion fantasma:** En la orden #64, una recepcion actualizo el detalle (`cantidad_recibida=5`, `RECIBIDO`) pero el INSERT del movimiento de inventario Y el update de stock fallaron silenciosamente (los errores solo se logueaban a consola). El SKU AL115-Rosa quedo con stock DB=12 vs fisico=17.
+
+**Soluciones implementadas:**
+
+| Fix | Archivo | Comportamiento |
+|---|---|---|
+| Proteccion de estado | `compras.js::guardar()` | En modo edicion, si el dropdown dice `PENDIENTE` pero hay items recibidos en DB, el estado se recalcula automaticamente: todos recibidos → `RECIBIDA`, algunos → `RECIBIENDO`. Se notifica via toast. Nunca se revierte una recepcion real |
+| Politica estricta (movimiento) | `database.js::recibir()` | Si el INSERT del movimiento falla, se revierte el PATCH del detalle (`cantidad_recibida` y `estado_detalle` vuelven a sus valores previos) y se retorna error visible al usuario. Nunca queda un item marcado "recibido" sin inventario |
+| Politica estricta (stock) | `database.js::recibir()` | Si el update de `stock_actual` falla, se elimina el movimiento recien creado (hard delete), se revierte el detalle y se retorna error. Si la variante no existe, mismo tratamiento |
+| Advertencias de estado | `database.js::recibir()` + UI | Los PATCH de `pos_compras.estado` verifican `.error`; si fallan se incluyen en `data.advertencias[]` y la UI muestra toast de advertencia (el inventario ya quedo consistente) |
+| Auto-recepcion con reporte | `compras.js::guardar()` | El loop de auto-recepcion al guardar con estado RECIBIDA ahora cuenta errores y muestra toast si algun item no pudo recibirse |
+
+**Decision documentada — checkTodos excluye soft-deleted:** El query que decide si la orden pasa a `RECIBIDA` usa el filtro default (`deleted_at=is.null`) a proposito: las filas soft-deleted ya no hacen parte de la orden y NO deben bloquear el paso a `RECIBIDA`. A diferencia del lookup de variante (que usa `incluirEliminados: true` porque el stock debe actualizarse siempre).
+
+**Tests:** `tests/compartido/database.test.js > DB.comprasDetalle.recibir` cubre: happy path total (detalle+movimiento+stock+estado), recepcion parcial (PENDIENTE/RECIBIENDO), fallo de movimiento (revertir detalle), fallo de stock (eliminar movimiento + revertir) y sobre-recepcion.
+
 ### 3.5 Facturación Electrónica (DIAN)
 
 #### 3.5.1 Ciclo de Vida

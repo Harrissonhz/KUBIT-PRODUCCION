@@ -191,6 +191,9 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 | Rango de anos en dropdowns | `filtro-anio`, `chart-anio`, `comp-anio1`, `comp-anio2` generados con `for (a = anioAct + 1; a >= 2023; a--)`. Incluye 2023 porque hay datos desde Sep 2023. |
 | Recepcion de Compras solo via flujo recibir() | El estado "RECIBIDA" NO debe asignarse directamente via dropdown `campo-estado` + PATCH. El unico camino valido es mediante `DB.comprasDetalle.recibir()` que crea movimiento de inventario (`entrada_compra`), actualiza `stock_actual` en `pos_productos_detalle` y establece `cantidad_recibida`. Ver `compras.js::guardar()` que ahora detecta cambio a RECIBIDA y auto-ejecuta recibir() para cada item pendiente. |
 | Smart Stats Filter (Inventario) | Las 4 cards del Resumen de Inventario (Total Productos, Con Stock, Stock Bajo, Agotados) son clickeables con `data-stat` y actuan como filtro AND con el buscador de texto sobre la tabla de Existencias Actuales. Click en una card activa el filtro con `ring-2` del color correspondiente. Click en la misma card o en el pill `✕` lo desactiva. `FILTRO_RESUMEN` es la variable de estado. `aplicarFiltroResumen()` y `actualizarFiltroUI()` manejan la logica. Sin cambios en DB — todo client-side sobre `PRODUCTOS_DETALLE`. |
+| Politica estricta de recepcion | `database.js::recibir()` NUNCA deja un item marcado recibido sin inventario. Si falla el INSERT del movimiento → revierte el PATCH del detalle y retorna error visible. Si falla el update de `stock_actual` → elimina el movimiento huerfano (hard delete), revierte el detalle y retorna error. Causa raiz: en produccion (OC #64, SKU AL115-Rosa) una recepcion actualizo el detalle pero movimiento+stock fallaron silenciosamente dejando stock DB=12 vs fisico=17 |
+| Proteccion de estado en guardar compras | `compras.js::guardar()` (modo edicion) recalcula el estado desde los detalles reales si el dropdown dice PENDIENTE: todos RECIBIDO → fuerza RECIBIDA, algunos → RECIBIENDO, con toast informativo. Nunca revierte una recepcion ya registrada. Causa raiz: OC #63 quedo PENDIENTE con 7/7 items recibidos porque un Guardar posterior sobrescribio el estado desde el dropdown desactualizado |
+| checkTodos excluye soft-deleted a proposito | El query de `recibir()` que decide RECIBIDA/RECIBIENDO usa el filtro default (`deleted_at=is.null`): las filas soft-deleted ya no hacen parte de la orden y no deben bloquear el paso a RECIBIDA. A diferencia del lookup de variante que SI usa `incluirEliminados:true` (el stock debe actualizarse siempre) |
 
 ---
 
@@ -524,6 +527,17 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 - [x] `inventario.js` — Nueva variable `FILTRO_RESUMEN` (null | 'con_stock' | 'stock_bajo' | 'agotados'). `obtenerListaFiltrada()` aplica AND entre filtro de resumen y texto. `aplicarFiltroResumen(tipo)` (toggle ON/OFF + paginacion reset + smooth scroll). `actualizarFiltroUI()` (ring-2 color en card activa, show/hide pill con label). Click handlers adjuntados una sola vez en `renderizarResumen()` via flag `window._resumenHandlersAttached`. Boton `#btn-limpiar-filtro` limpia filtro y re-renderiza.
 - [x] Sin cambios en DB — todo client-side sobre `PRODUCTOS_DETALLE`.
 - [x] `npm test` → 105 passed, 0 failures
+
+#### Modulo POS — Fase 29: Politica Estricta de Recepcion + Proteccion de Estado (Fix bugs OC #63/#64)
+- [x] `database.js::recibir()` — Politica estricta: si el INSERT del movimiento falla → revierte el PATCH del detalle y retorna error visible. Si el update de `stock_actual` falla → elimina el movimiento huerfano (hard delete via `api.delete`), revierte el detalle y retorna error. Si la variante no existe → mismo tratamiento.
+- [x] `database.js::recibir()` — Los PATCH de `pos_compras.estado` (RECIBIDA/RECIBIENDO) ahora verifican `.error`; en fallo se agregan a `data.advertencias[]` que la UI muestra como toast.
+- [x] `database.js::recibir()` — Decision documentada: `checkTodos` excluye soft-deleted a proposito (filas eliminadas ya no son parte de la orden).
+- [x] `compras.js::guardar()` — Proteccion de estado: en modo edicion, si el dropdown dice PENDIENTE pero hay items recibidos en DB, recalcula estado (todos RECIBIDO → RECIBIDA, algunos → RECIBIENDO) con toast informativo. Nueva variable `EDITANDO_ESTADO`.
+- [x] `compras.js::guardar()` — El loop de auto-recepcion (estado RECIBIDA) ahora cuenta errores de `recibir()` y muestra toast con la cantidad fallida.
+- [x] `compras.js::confirmarRecepcion()/onRecibirTodo()` — Muestran advertencias de `res.data.advertencias` cuando el estado de la orden no pudo actualizarse.
+- [x] Causa raiz diagnosticada con queries SQL en produccion: OC #63 quedo PENDIENTE con 7/7 items recibidos (Guardar posterior sobrescribio el estado); OC #64 tuvo recepcion fantasma de AL115-Rosa x5 (movimiento+stock fallaron silenciosamente, stock DB=12 vs fisico=17). Ajuste de datos ejecutado por el usuario (INSERT movimiento + UPDATE stock=17).
+- [x] `service-worker.js` — Cache bump `kubit-pos-20260825-01`.
+- [x] `tests/compartido/database.test.js` — 5 nuevos tests de `DB.comprasDetalle.recibir`: happy path total, parcial (RECIBIENDO), fallo movimiento (revertir), fallo stock (eliminar movimiento + revertir), sobre-recepcion rechazada.
 
 ### 7.4 Próximo Paso Recomendado
 **Despues del deploy:** Integración con MercadoLibre para sincronizar productos y pedidos.
@@ -1163,6 +1177,13 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 | Bug: estado RECIBIDA sin stock update | Si una orden de compra tiene `estado=RECIBIDA` pero `cantidad_recibida=0`, es porque se marco via dropdown saltando `recibir()`. Solucion: ejecutar "Recibir Todo" en la UI o editar y guardar con RECIBIDA (el fix auto-ejecuta recibir). |
 | Smart Stats Filter | `inventario.js::FILTRO_RESUMEN`, `aplicarFiltroResumen()`, `actualizarFiltroUI()`, `data-stat`, `#card-stat-*`, `#filtro-activo`. Cards de resumen clickeables filtran tabla de Existencias Actuales con AND logico + buscador. Todo client-side sobre `PRODUCTOS_DETALLE`. |
 | Filtro interactivo inventario | `inventario.html` cards con `data-stat="total|con_stock|stock_bajo|agotados"`, `cursor-pointer`, `ring-2` al activarse. Pill `#filtro-activo` con label y boton `✕` para limpiar. |
+| Recepcion de Compras auto | `compras.js::guardar()` detecta estado RECIBIDA y auto-ejecuta `DB.comprasDetalle.recibir()` por item. No usar `campo-estado` + PATCH directo. |
+| incluirEliminados en recibir | `database.js::recibir()` usa `incluirEliminados: true` para encontrar variantes soft-deleted. Si se omite, `select()` helper agrega `deleted_at=is.null` y el stock update se salta. |
+| cacheClear post-recepcion | `database.js::recibir()` ahora hace `_cacheClear('productos')` para que el stock actualizado se refleje inmediatamente en el POS. |
+| Bug: estado RECIBIDA sin stock update | Si una orden de compra tiene `estado=RECIBIDA` pero `cantidad_recibida=0`, es porque se marco via dropdown saltando `recibir()`. Solucion: ejecutar "Recibir Todo" en la UI o editar y guardar con RECIBIDA (el fix auto-ejecuta recibir). |
+| Politica estricta recepcion | `database.js::recibir()` revierte detalle si movimiento o stock fallan. Nunca queda item RECIBIDO sin inventario. Advertencias via `res.data.advertencias[]`. |
+| Proteccion estado guardar compras | `compras.js::guardar()` recalcula estado desde detalles reales si dropdown dice PENDIENTE. Variable `EDITANDO_ESTADO`. Bloquea retroceso RECIBIENDO/RECIBIDA → PENDIENTE. |
+| Recepcion fantasma | Sintoma: detalle con `cantidad_recibida > 0` sin movimiento en `pos_movimientos_inventario`. Diagnostico: comparar `sum(cantidad_recibida)` vs movimientos `entrada_compra` por referencia `OC-<numero>`. |
 
 ## 13. Registro de Cambios (continuacion)
 
@@ -1409,3 +1430,18 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 | `AGENTS.md` | Seccion 5: 3 nuevas decisiones (Rentabilidad TOTAL 4 queries, CMV 2 fuentes, Gastos+Comisiones exclusion). Seccion 7.2: Fase 26. Seccion 11: 9 nuevas keywords. |
 | `specs/03-pos-spec.md` | Nueva subseccion 9.10 documentando Rentabilidad TOTAL (diseno, formula, metodos DB). Subseccion 9.10.6 para 3ra fila de indicadores complementarios. |
 | `npm test` | 105 passed, 0 failures |
+
+### 2026-08-25 — Politica Estricta de Recepcion + Proteccion de Estado (Fase 29)
+
+**Diagnostico en produccion:** OC #63 quedo PENDIENTE con 7/7 items RECIBIDO (un Guardar posterior sobrescribio el estado desde el dropdown desactualizado) y OC #64 tuvo recepcion fantasma de AL115-Rosa x5 (el detalle quedo RECIBIDO pero movimiento de inventario + stock fallaron silenciosamente; stock DB=12 vs fisico=17). Diagnostico realizado con queries SQL comparando `cantidad_recibida` vs movimientos `entrada_compra` por referencia.
+
+| Archivo | Cambio |
+|---|---|
+| `apps/pos/js/compartido/database.js` | `recibir()` politica estricta: fallo del INSERT del movimiento → revierte PATCH del detalle y retorna error. Fallo del update de stock → elimina movimiento huerfano (`api.delete`) + revierte detalle + retorna error. Variante inexistente → mismo tratamiento. Los PATCH de `pos_compras.estado` verifican `.error` y agregan `advertencias[]` a la respuesta. `checkTodos` conserva filtro default soft-delete con decision documentada. Retorno incluye `data.advertencias[]`. |
+| `apps/pos/js/paginas/compras.js` | `guardar()` proteccion de estado: recalcula estado desde detalles reales si dropdown dice PENDIENTE y hay items recibidos (todos → RECIBIDA, algunos → RECIBIENDO) con toast. Nueva variable `EDITANDO_ESTADO`. Auto-recepcion cuenta errores y muestra toast. `confirmarRecepcion()/onRecibirTodo()` muestran `res.data.advertencias`. |
+| `apps/pos/service-worker.js` | Cache bump `kubit-pos-20260825-01`. |
+| `tests/compartido/database.test.js` | 5 nuevos tests de `DB.comprasDetalle.recibir`: happy path total, parcial (RECIBIENDO), fallo movimiento (revertir), fallo stock (eliminar movimiento + revertir), sobre-recepcion rechazada. |
+| `specs/03-pos-spec.md` | Nueva subseccion 3.4.4 documentando Politica Estricta de Recepcion (problema, soluciones, decision checkTodos). |
+| `AGENTS.md` | Seccion 5: 3 nuevas decisiones. Seccion 7.2: Fase 29. Seccion 11: 8 nuevas keywords. Este changelog. |
+| **Ajuste de datos (SQL ejecutado por el usuario)** | OC #63: UPDATE estado='RECIBIDA' (con guard EXISTS). AL115-Rosa: INSERT movimiento entrada_compra x5 ref 'OC-64' + UPDATE `stock_actual=17` en variante `31492c44-cdf2-4c88-991b-511f8126bb7a`. Auditoria global de las ordenes 61-64 confirmo que fue la unica discrepancia. |
+| `npm test` | 110 passed, 0 failures (105 → 110, +5 tests recibir) |
