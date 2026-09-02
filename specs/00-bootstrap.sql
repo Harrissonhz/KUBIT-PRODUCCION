@@ -45,7 +45,25 @@ create extension if not exists unaccent;
 
 
 -- ============================================================
+-- PASO 4: RPCs criticos para POS (ventas) — OBLIGATORIO
+-- Archivo: 04-rpcs-ventas.sql
+-- Contenido: tabla pos_consecutivos + RPC generar_consecutivo(text,text)
+--            + RPC actualizar_finanzas_mensuales(int,int,numeric,numeric,numeric,numeric)
+--            Grants execute para authenticated/service_role, RLS
+-- Importancia: SIN ESTE PASO ventas.js:635 falla con 404 PGRST202
+--            "Could not find function generar_consecutivo" y bloquea
+--            TODAS las ventas POS. Patch agregado tras bug NexoraShop (2026-05).
+--            Es idempotente y debe ejecutarse SIEMPRE en fresh deploy.
+-- ============================================================
+-- >> Ejecutar 04-rpcs-ventas.sql a continuacion
+--    Verificacion: select public.generar_consecutivo('VENTA','KBT');
+
+
+-- ============================================================
 -- FIN: Base de datos 100% operativa
 -- Siguiente paso: Poblar datos desde plan de migracion
 --   ArchivosInformativos/MigracionDB/01-plan-migracion.md
+-- NOTA TEMPLATE: Al clonar Kubit para un nuevo cliente, copiar
+-- 01-schema.sql + 02-seed-permisos.sql + 03-seed-store-grants.sql
+-- + 04-rpcs-ventas.sql. Olvidar 04 rompe ventas.
 -- ============================================================
