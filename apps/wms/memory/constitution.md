@@ -5,13 +5,14 @@
 
 ## Artículo 0 — Reglas raíz de Kubit (heredadas)
 - **Cero suposiciones:** si falta una spec en `/specs/`, **PREGUNTAR**; nunca inventar.
-- **No asumir pago:** solo planes gratuitos de Supabase/Vercel; sin Storage de Supabase.
+- **No asumir pago:** solo planes gratuitos de Supabase/Vercel; sin Storage de Supabase; sin Edge Functions en producción.
 - **Responsive:** mobile-first, mínimo 360px, clases de `05-ui-ux-system.md`.
 - **Sin commits automáticos:** la IA no hace `git commit`/`push` salvo petición explícita.
 
 ## Artículo 1 — Stack (confirmado, no reabrir)
-- **HTML + Tailwind (CDN) + JavaScript vanilla.** Sin React/Vue/Angular, sin TypeScript, sin build.
-- **Supabase (PostgREST)** vía `supabase-js`; sin ORM; sin servidor propio. Lógica compleja → Edge Functions o funciones Postgres (`.rpc()`).
+- **HTML + Tailwind (CDN) + JavaScript vanilla (IIFE por página).** Sin React/Vue/Angular, sin TypeScript, sin build.
+- **Supabase (PostgREST)** vía `supabase-js`; sin ORM; sin servidor propio. Lógica transaccional → funciones Postgres `.rpc()`.
+- **Testing:** vitest + jsdom.
 
 ## Artículo 2 — Separación de responsabilidades
 - **POS = fuente de verdad contable.** `pos_productos_detalle.stock_actual` es la única verdad del "cuánto".
@@ -62,4 +63,8 @@ Toda operación preserva este invariante; las pruebas lo verifican.
 - Sin capacidad ni bloqueos. Sin devoluciones formales (vía ajuste POS). Sin carga inicial masiva (vía Inventario general). Sin triggers/Edge Functions de sync (Fase 2). Sin multiusuario operativo.
 
 ## Artículo 11 — Calidad
-- Toda funcionalidad llega con su prueba (patrón `tests/…/*.test.js`, skill `tdd`). Un cambio atómico por unidad de trabajo. **Sin commit** salvo petición.
+- Toda funcionalidad llega con su prueba (vitest + jsdom, skill `tdd`). Un cambio atómico por unidad de trabajo. **Sin commit** salvo petición.
+
+## Artículo 12 — Referencias de specs (numeración real del repo)
+- Spec funcional: **`specs/07-wms-spec.md`** (el `06` es `06-servicio-correo.md`).
+- DDL: **`specs/08-wms-schema.sql`**.

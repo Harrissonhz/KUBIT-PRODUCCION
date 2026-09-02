@@ -5,7 +5,7 @@
 
 ## Prioridad 1 — Cimientos (bloquean todo lo demás)
 - [ ] T-001 Estructura `apps/wms` + index.html base (Slate + dark)
-- [ ] T-002 `js/config.js` (Supabase)
+- [ ] T-002 `js/config.js` + `js/supabase.js`
 - [ ] T-101 Tabla `wms_bodegas`
 - [ ] T-102 Tabla `wms_ubicaciones`
 - [ ] T-103 Tabla `wms_stock_ubicacion`
@@ -32,7 +32,7 @@
 - [ ] T-309 Prueba de invariante por RPC
 
 ## Prioridad 4 — Capa de datos + pantallas
-- [ ] T-401 `js/database.js` (DB.wms.*)
+- [ ] T-401 `js/compartido/database.js` (DB.wms.*)
 - [ ] T-402 config.html (bodegas/contenedores)
 - [ ] T-403 inventario.html (ubicar)
 - [ ] T-404 buscar.html
@@ -41,9 +41,9 @@
 - [ ] T-407 reconciliacion.html
 - [ ] T-408 baja.html
 - [ ] T-409 index.html (dashboard)
-- [ ] T-003 `js/auth.js`
-- [ ] T-004 PWA (manifest + SW)
-- [ ] T-005 Sidebar/navegación
+- [ ] T-003 `js/compartido/auth.js`
+- [ ] T-004 PWA (manifest + SW + vercel.json)
+- [ ] T-005 sidebar + navegación
 
 ## Prioridad 5 — Endurecimiento
 - [ ] T-501 Idempotencia end-to-end

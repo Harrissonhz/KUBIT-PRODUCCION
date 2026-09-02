@@ -21,17 +21,23 @@ wms-sdd/
     ├── plan.md          # CÓMO (stack Kubit real, estructura, .rpc())
     └── tasks.md         # Backlog atómico (T-0xx…T-5xx)
 ```
-> La spec funcional completa vive en `06-wms-spec.md` (v5) y debe ir en `/specs/` del monorepo.
+> La spec funcional completa vive en `07-wms-spec.md` (v6) y va en `/specs/` del monorepo, junto al futuro `08-wms-schema.sql`.
+
+## Numeración en /specs/ (verificada contra ARCHITECTURE.md)
+El `06` ya está ocupado por `06-servicio-correo.md`. Por eso el WMS usa:
+- **`07-wms-spec.md`** — especificación funcional.
+- **`08-wms-schema.sql`** — DDL de las tablas `wms_*`.
 
 ## Stack (confirmado en el AGENTS.md raíz de Kubit — no reabrir)
-- **Frontend:** HTML + **Tailwind (CDN)** + **JavaScript vanilla** (IIFE por página). Sin SPA, sin TypeScript, sin build.
-- **DB/API:** Supabase (PostgreSQL) + PostgREST; transacciones vía **funciones Postgres `.rpc()`**.
+- **Frontend:** HTML + **Tailwind (CDN)** + **JavaScript vanilla** (IIFE por página). Sin SPA, sin TypeScript, sin build. Navegación tradicional.
+- **DB/API:** Supabase (PostgreSQL) + PostgREST (REST directa); transacciones vía **funciones Postgres `.rpc()`**. Sin Edge Functions en producción.
 - **DB decisiones:** UUID v4, `timestamptz`, trigger `update_updated_at()`, `deleted_at`, **estados con CHECK strings (no ENUMs)**, RLS + grants, FK indexadas.
 - **UI:** ultra-minimalista **Slate**, **modo oscuro por defecto**, mobile-first ≥360px.
+- **Testing:** vitest + jsdom.
 - **PWA:** `manifest.json` + `service-worker.js`. **Hosting:** Vercel gratuito. **Sin commits automáticos.**
 
 ## Cómo se usa
-1. Coloca `06-wms-spec.md` y `07-wms-schema.sql` en `/specs/`, y estos artefactos donde gestiones el bucle (p.ej. `.ralph/`).
+1. Coloca `07-wms-spec.md` y (cuando exista) `08-wms-schema.sql` en `/specs/`, y estos artefactos donde gestiones el bucle (p.ej. `.ralph/`).
 2. Ajusta `ralph.sh`: `AGENT_CMD` a tu CLI (`claude -p`, `codex exec`, `opencode run`).
 3. Ejecuta:
    ```bash
@@ -43,7 +49,7 @@ wms-sdd/
 
 ## Orden de construcción (resumen de tasks.md)
 1. **Épica 0** Estructura `apps/wms` (HTML base Slate/dark, config.js, PWA).
-2. **Épica 1** `07-wms-schema.sql`: tablas `wms_*` + CHECK + índices + trigger + RLS + grants.
+2. **Épica 1** `08-wms-schema.sql`: tablas `wms_*` + CHECK + índices + trigger + RLS + grants.
 3. **Épica 2** Dominio JS: `codigos.js`, `stock.js`, `reconciliacion.js` + pruebas.
 4. **Épica 3** Funciones `.rpc()` atómicas (recibir, ubicar, reservar, despachar, liberar, trasladar, ajustar, baja).
 5. **Épica 4** `database.js` (DB.wms.*) + pantallas HTML/JS.

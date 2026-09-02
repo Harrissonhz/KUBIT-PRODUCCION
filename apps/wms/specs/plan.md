@@ -1,20 +1,21 @@
 # plan.md — Plan técnico de implementación Kubit-WMS (MVP)
 
-> **Cómo.** Arquitectura, estructura y decisiones técnicas derivadas de `spec.md`, `constitution.md` y el **AGENTS.md raíz de Kubit**.
+> **Cómo.** Arquitectura, estructura y decisiones técnicas derivadas de `07-wms-spec.md`, `constitution.md` y el **AGENTS.md raíz de Kubit**.
 
 ## 1. Stack (confirmado en Kubit — no reabrir)
-- **Frontend:** HTML semántico + **Tailwind CSS vía CDN** + **JavaScript vanilla** (IIFE por página). Sin SPA, sin TypeScript, sin build. Alpine.js ligero solo si es imprescindible.
+- **Frontend:** HTML semántico + **Tailwind CSS vía CDN** + **JavaScript vanilla** (IIFE por página). Sin SPA, sin TypeScript, sin build. Navegación tradicional (`<a href>`).
 - **Backend/DB:** PostgreSQL 15+ vía **Supabase** (plan gratuito). Cliente `supabase-js`. Sin ORM.
-- **API:** Supabase Data API (**PostgREST**). Lógica transaccional → **funciones Postgres** llamadas con `.rpc()` (o Edge Functions si se requiere). Sin servidor propio.
-- **Auth:** Supabase Auth (reutiliza usuarios de Kubit).
+- **API:** Supabase Data API (**PostgREST**) REST directa. Transacciones → **funciones Postgres** con `.rpc()`. Sin Edge Functions en producción.
+- **Auth:** Supabase Auth (`window.KubitAuth`).
 - **PWA:** `manifest.json` + `service-worker.js` (patrón POS/Store).
+- **Testing:** vitest + jsdom.
 - **Hosting:** Vercel (plan gratuito).
 
-## 2. Estructura de archivos (coherente con el monorepo Kubit)
+## 2. Estructura de archivos (coherente con ARCHITECTURE.md del monorepo)
 ```
 /specs/
-  ├── 06-wms-spec.md         # Especificación funcional (fuente de verdad)
-  └── 07-wms-schema.sql      # DDL de tablas wms_* (patrón de 02-database-schema.sql)
+  ├── 07-wms-spec.md         # Especificación funcional (fuente de verdad)
+  └── 08-wms-schema.sql      # DDL de tablas wms_* (patrón de 02-database-schema.sql)
 
 /apps/wms/
   ├── index.html             # Dashboard
@@ -25,14 +26,17 @@
   ├── reconciliacion.html
   ├── baja.html
   ├── config.html            # Bodegas y contenedores
+  ├── vercel.json            # rewrites (patrón POS)
   ├── manifest.json
-  ├── service-worker.js
-  ├── css/                   # (si hace falta CSS propio; base es Tailwind CDN)
+  ├── service-worker.js      # cache-first (wms-YYYYMMDD-NN)
+  ├── css/estilo.css
   └── js/
-      ├── config.js          # credenciales Supabase (patrón POS/Store)
-      ├── database.js        # objeto DB.wms.* (acceso vía supabase-js / .rpc())
-      ├── auth.js            # sesión + poblarUserHeader()
-      ├── codigos.js         # parseo/validación código B CC PP
+      ├── config.js          # credenciales Supabase (QA)
+      ├── supabase.js        # cliente REST
+      ├── compartido/
+      │   ├── database.js    # window.DB.wms.* (CRUD + .rpc())
+      │   ├── auth.js        # window.KubitAuth + poblarUserHeader()
+      │   └── sidebar.js
       └── paginas/
           ├── inventario.js
           ├── buscar.js
@@ -42,7 +46,7 @@
           ├── baja.js
           └── config.js
 
-/tests/wms/                  # pruebas *.test.js (patrón del repo; skill tdd)
+/tests/wms/                  # pruebas *.test.js (vitest + jsdom)
   ├── codigos.test.js
   ├── stock.test.js
   ├── reconciliacion.test.js
@@ -50,7 +54,7 @@
 ```
 
 ## 3. Modelo de datos (tablas `wms_*`)
-Según `06-wms-spec.md` §4.2. Cinco tablas: `wms_bodegas`, `wms_ubicaciones` (árbol `parent_id`), `wms_stock_ubicacion` (núcleo), `wms_movimientos` (ledger), `wms_conteos`.
+Según `07-wms-spec.md` §4.2. Cinco tablas: `wms_bodegas`, `wms_ubicaciones` (árbol `parent_id`), `wms_stock_ubicacion` (núcleo), `wms_movimientos` (ledger), `wms_conteos`.
 
 ### Decisiones "No Reabrir" aplicadas
 - PK UUID v4 `gen_random_uuid()`; `timestamptz` default `now()`; `updated_at` vía trigger `update_updated_at()`; `deleted_at` nullable.
@@ -59,7 +63,7 @@ Según `06-wms-spec.md` §4.2. Cinco tablas: `wms_bodegas`, `wms_ubicaciones` (�
   - `wms_ubicaciones.tipo` CHECK IN (`'ESTANTERIA','ENTREPANO','CAJA','CANASTILLA','BOLSA','SUELTO'`).
   - `wms_movimientos.tipo_movimiento` CHECK IN (`'ENTRADA','UBICACION','TRASLADO','RESERVA','DESPACHO','AJUSTE','BAJA','LIBERACION'`).
 - **RLS** habilitado + políticas por rol; **grants** explícitos (`anon`, `authenticated`, `service_role`).
-- Todas las FK **indexadas**. Auditoría → `pos_usuarios`.
+- Todas las FK **indexadas**. Auditoría → `pos_usuarios`. Zona horaria America/Bogota.
 
 ## 4. Transacciones atómicas (funciones Postgres via `.rpc()`)
 Para garantizar atomicidad (Artículo 5) sin servidor propio, las operaciones stock+movimiento se implementan como **funciones PL/pgSQL** en Supabase, invocadas desde `database.js` con `supabase.rpc()`:
@@ -72,8 +76,8 @@ Para garantizar atomicidad (Artículo 5) sin servidor propio, las operaciones st
 - `wms_ajustar(producto_detalle_id, delta, ubicacion_id?)` → AJUSTE + propaga a `pos_movimientos_inventario`.
 - `wms_dar_baja(producto_detalle_id, ubicacion_id, cantidad)` → BAJA + `merma` en POS.
 
-## 5. Capa de datos (`js/database.js`)
-- Objeto global `DB.wms.*` (patrón de los `DB.*` del POS).
+## 5. Capa de datos (`js/compartido/database.js`)
+- Objeto global `window.DB.wms.*` (patrón `DatabaseService` del POS: IIFE + caché en memoria con Map).
 - Lecturas: `supabase.from('wms_...').select()` con embeds PostgREST.
 - Escrituras transaccionales: `supabase.rpc('wms_...', {...})`.
 - Sincronización bajo demanda: consultas a `pos_compras`/`pos_ventas`/`pos_movimientos_inventario` filtrando lo que **no** tiene `ref_pos_*` en `wms_movimientos`.
@@ -87,14 +91,15 @@ Para garantizar atomicidad (Artículo 5) sin servidor propio, las operaciones st
 - Service worker: rutas relativas, cache-first + fallback, versioning `wms-YYYYMMDD-NN`, bypass en localhost, `ignoreSearch:true`.
 - `auth.js::poblarUserHeader()` con IDs `user-avatar`, `user-name`, `user-rol`.
 
-## 8. Pruebas (skill tdd, patrón del repo)
+## 8. Pruebas (vitest + jsdom, patrón del repo)
 - **Unitarias:** `codigos.test.js`, `stock.test.js` (transiciones), `reconciliacion.test.js`.
 - **Flujos:** `flujos.test.js` cubre HU-01…HU-08 verificando el invariante tras cada operación.
 - **Idempotencia:** reejecutar recibir/reservar no duplica.
+- Mocks de `window.__supabase`, `window.KubitAuth`, `localStorage` (patrón `tests/setup.js`).
 
 ## 9. Orden de construcción (detalle en tasks.md)
 1. Estructura `apps/wms` + `config.js` + `service-worker.js` + `manifest.json` + layout Slate/dark.
-2. `07-wms-schema.sql`: tablas + CHECK + índices + trigger + RLS + grants.
+2. `08-wms-schema.sql`: tablas + CHECK + índices + trigger + RLS + grants.
 3. `codigos.js` + pruebas.
 4. Funciones `.rpc()` atómicas + pruebas de flujo.
 5. `database.js` (DB.wms.*) + lectura bajo demanda del POS.

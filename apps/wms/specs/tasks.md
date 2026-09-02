@@ -1,16 +1,16 @@
 # tasks.md — Backlog ejecutable Kubit-WMS (MVP)
 
 > Lista ordenada y atómica. El bucle Ralph toma **una tarea pendiente por iteración**, la implementa, la prueba y la marca `[x]`.
-> Stack: HTML + Tailwind (CDN) + JS vanilla + Supabase (PostgREST/.rpc()). Estados: `[ ]` pendiente · `[x]` hecho · `[!]` bloqueado.
+> Stack: HTML + Tailwind (CDN) + JS vanilla + Supabase (PostgREST/.rpc()). Testing vitest + jsdom. Estados: `[ ]` pendiente · `[x]` hecho · `[!]` bloqueado.
 
 ## Épica 0 — Estructura del módulo (sin build)
 - [ ] T-001 Crear `apps/wms/` con `index.html` base (layout Slate + modo oscuro por defecto + anti-flash) y Tailwind CDN.
-- [ ] T-002 `js/config.js` con credenciales Supabase (patrón POS/Store, plan gratuito).
-- [ ] T-003 `js/auth.js` (sesión + `poblarUserHeader()` con IDs `user-avatar`/`user-name`/`user-rol`).
-- [ ] T-004 `manifest.json` + `service-worker.js` (rutas relativas, cache-first, versioning `wms-YYYYMMDD-NN`, bypass localhost).
-- [ ] T-005 Sidebar/navegación a las 8 pantallas (patrón POS, responsive ≥360px).
+- [ ] T-002 `js/config.js` + `js/supabase.js` (cliente REST, credenciales QA, plan gratuito).
+- [ ] T-003 `js/compartido/auth.js` (`window.KubitAuth` + `poblarUserHeader()` con IDs `user-avatar`/`user-name`/`user-rol`).
+- [ ] T-004 `manifest.json` + `service-worker.js` (rutas relativas, cache-first, versioning `wms-YYYYMMDD-NN`, bypass localhost, `ignoreSearch:true`) + `vercel.json`.
+- [ ] T-005 `js/compartido/sidebar.js` + navegación a las 8 pantallas (patrón POS, responsive ≥360px).
 
-## Épica 1 — Modelo de datos (`/specs/07-wms-schema.sql`)
+## Épica 1 — Modelo de datos (`/specs/08-wms-schema.sql`)
 - [ ] T-101 Tabla `wms_bodegas` (UUID, timestamptz, trigger updated_at, deleted_at, auditoría).
 - [ ] T-102 Tabla `wms_ubicaciones` (árbol `parent_id`, `tipo` CHECK string, `es_hoja`, `mono_sku`, `codigo`).
 - [ ] T-103 Tabla `wms_stock_ubicacion` (`estado_fase` CHECK string, `cantidad`, `ubicacion_id` nullable).
@@ -37,7 +37,7 @@
 - [ ] T-309 Prueba de invariante tras cada RPC (`tests/wms/flujos.test.js`).
 
 ## Épica 4 — Capa de datos + Pantallas (HTML + JS vanilla)
-- [ ] T-401 `js/database.js` — objeto `DB.wms.*` (lecturas PostgREST + escrituras `.rpc()` + lectura bajo demanda del POS).
+- [ ] T-401 `js/compartido/database.js` — `window.DB.wms.*` (lecturas PostgREST + escrituras `.rpc()` + lectura bajo demanda del POS).
 - [ ] T-402 **config.html** + `paginas/config.js`: alta de bodegas y contenedores (código validado).
 - [ ] T-403 **inventario.html** + `paginas/inventario.js`: contar y **ubicar** (`SIN_UBICAR → UBICADO`).
 - [ ] T-404 **buscar.html** + `paginas/buscar.js`: ruta completa + cantidades por estado.
@@ -52,7 +52,7 @@
 - [ ] T-502 Verificar atomicidad (fallo simulado revierte todo en la función Postgres).
 - [ ] T-503 PWA offline básica (últimas búsquedas / mapa).
 - [ ] T-504 Revisión del invariante en los 8 flujos + reporte.
-- [ ] T-505 Actualizar `06-wms-spec.md` / `README` con notas de implementación.
+- [ ] T-505 Actualizar `07-wms-spec.md` / `README` con notas de implementación.
 
 ## Definición de Hecho (global)
-Cada tarea: código o SQL + prueba (patrón del repo), pruebas en verde, responsive/paleta OK si es UI, `tasks.md`/`fix_plan.md`/`progress.md` actualizados. **Sin commit** salvo petición explícita.
+Cada tarea: código o SQL + prueba (vitest + jsdom), pruebas en verde, responsive/paleta OK si es UI, `tasks.md`/`fix_plan.md`/`progress.md` actualizados. **Sin commit** salvo petición explícita.

@@ -1,6 +1,6 @@
 # spec.md — Especificación funcional Kubit-WMS (MVP)
 
-> **Qué y por qué.** Derivado de `06-wms-spec.md` v5. Referencia funcional del bucle Ralph. Subordinado al AGENTS.md raíz de Kubit.
+> **Qué y por qué.** Derivado de `07-wms-spec.md` v6. Referencia funcional del bucle Ralph. Subordinado al AGENTS.md raíz de Kubit.
 
 ## 1. Problema
 Kubit-POS controla *cuánto* stock hay, pero no *dónde está físicamente*. La tienda Outletshop almacena en **3 bodegas** con dos paradigmas (estantería→entrepaño→caja y canastilla→bolsa/suelto) y necesita ubicar lo recibido y localizar lo vendido.
@@ -51,7 +51,7 @@ Un módulo `apps/wms` que permita: **recibir** (leer del POS), **ubicar** (Inven
 - **AC1:** `→ BAJA` y propaga al POS como `merma`.
 
 ## 4.9 Stack (heredado de Kubit)
-HTML + Tailwind (CDN) + JavaScript vanilla + Supabase (PostgREST/`.rpc()`). Sin frameworks SPA, sin TypeScript, sin build. UI Slate, modo oscuro por defecto, mobile-first ≥360px. Detalle en `plan.md` y `AGENTS.md`.
+HTML + Tailwind (CDN) + JavaScript vanilla + Supabase (PostgREST/`.rpc()`). Sin frameworks SPA, sin TypeScript, sin build. Testing vitest + jsdom. UI Slate, modo oscuro por defecto, mobile-first ≥360px. Detalle en `plan.md` y `AGENTS.md`.
 
 ## 5. Configuración inicial (maestros)
 - Alta de las **3 bodegas** (1, 2, 3).
@@ -61,7 +61,7 @@ HTML + Tailwind (CDN) + JavaScript vanilla + Supabase (PostgREST/`.rpc()`). Sin 
 FIFO/FEFO, lotes/vencimiento, primera/segunda calidad, capacidad/bloqueos, devoluciones formales, carga inicial masiva, triggers/Edge Functions de sync, multiusuario operativo.
 
 ## 7. Nomenclatura de códigos (resumen)
-`B CC PP` (5 dígitos). Ej.: `20110` = Bodega2·Canastilla01·Bolsa10; `35905` = Bodega3·Entrepaño59·Caja05; `30191` = Bodega3·Canastilla01·Suelto. Detalle en `06-wms-spec.md` §15.
+`B CC PP` (5 dígitos). Ej.: `20110` = Bodega2·Canastilla01·Bolsa10; `35905` = Bodega3·Entrepaño59·Caja05; `30191` = Bodega3·Canastilla01·Suelto. Detalle en `07-wms-spec.md` §15.
 
 ## 8. Métricas de éxito
 - Flujo end-to-end de las 8 historias operable **desde el celular** con entrada manual.
