@@ -1,0 +1,9 @@
+# .vercelignore — Kubit-WMS
+# Archivos del repositorio que NO deben publicarse en Vercel.
+# Siguen en GitHub; solo se excluyen del sitio publico.
+
+# Documentacion del proyecto (SDD / Ralph)
+*.md
+memory/
+specs/
+ralph.sh

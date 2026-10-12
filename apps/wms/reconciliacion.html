@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Kubit WMS — Reconciliacion</title>
+  <!--
+    PASO C3: Reconciliacion (HU-07). Solo lectura (CR1).
+    1. Diferencias entre el stock del POS y el del WMS, con la causa y la
+       accion sugerida.
+    2. Salidas del POS pendientes (enlace a Bajas y ajustes).
+    3. Conteos con sobrante pendiente (enlace a Inventario).
+    4. Otros movimientos del POS sin procesar.
+  -->
+  <script>
+    if (localStorage.getItem('darkMode') === 'false') {
+      document.documentElement.classList.remove('dark');
+    }
+  </script>
+  <script src="https://cdn.tailwindcss.com" charset="UTF-8"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: { fontFamily: { sans: ['Poppins', 'sans-serif'] } } }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/estilo.css">
+  <link rel="stylesheet" href="css/wms.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#020617">
+  <link rel="icon" href="img/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="img/icon-192x192.png">
+</head>
+<body data-pagina="reconciliacion" data-titulo="Reconciliacion"
+  class="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-950 dark:text-white font-sans">
+
+  <main id="contenido" class="invisible px-4 max-w-xl mx-auto lg:max-w-3xl space-y-5">
+
+    <div class="sticky top-16 z-10 -mx-4 px-4 pt-1 pb-3 bg-slate-50/95 dark:bg-slate-950/95 backdrop-blur">
+      <div class="flex items-center justify-between gap-3">
+        <div class="min-w-0">
+          <p id="resumen" class="text-sm font-medium">Cargando...</p>
+          <p id="estado-sync" class="text-xs text-slate-500 dark:text-slate-400"></p>
+        </div>
+        <button id="btn-actualizar" type="button"
+          class="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"/>
+          </svg>
+          Actualizar
+        </button>
+      </div>
+    </div>
+
+    <div id="aviso" class="hidden rounded-xl border border-amber-300 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/30 p-3 text-sm text-amber-800 dark:text-amber-300"></div>
+
+    <section>
+      <div class="flex items-center justify-between mb-2">
+        <p class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Diferencias con el POS</p>
+        <p id="dif-resumen" class="text-xs text-slate-500 dark:text-slate-400"></p>
+      </div>
+      <div id="dif-lista" class="space-y-2"></div>
+    </section>
+
+    <section>
+      <div class="flex items-center justify-between mb-2">
+        <p class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Salidas del POS por resolver</p>
+        <p id="sal-resumen" class="text-xs text-slate-500 dark:text-slate-400"></p>
+      </div>
+      <div id="sal-lista" class="space-y-2"></div>
+    </section>
+
+    <section>
+      <div class="flex items-center justify-between mb-2">
+        <p class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Sobrantes de conteo</p>
+        <p id="sob-resumen" class="text-xs text-slate-500 dark:text-slate-400"></p>
+      </div>
+      <div id="sob-lista" class="space-y-2"></div>
+    </section>
+
+    <section>
+      <div class="flex items-center justify-between mb-2">
+        <p class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Otros movimientos del POS sin procesar</p>
+        <p id="otr-resumen" class="text-xs text-slate-500 dark:text-slate-400"></p>
+      </div>
+      <div id="otr-lista" class="space-y-2"></div>
+    </section>
+  </main>
+
+  <script src="js/config.js" charset="UTF-8"></script>
+  <script src="js/supabase.js" charset="UTF-8"></script>
+  <script src="js/compartido/database.js" charset="UTF-8"></script>
+  <script src="js/compartido/auth.js" charset="UTF-8"></script>
+  <script src="js/compartido/layout.js" charset="UTF-8"></script>
+  <script src="js/compartido/fecha.js" charset="UTF-8"></script>
+  <script src="js/paginas/reconciliacion.js" charset="UTF-8"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('service-worker.js');
+      navigator.serviceWorker.addEventListener('message', function (ev) {
+        if (ev.data && ev.data.accion === 'recargar') location.reload();
+      });
+    }
+  </script>
+</body>
+</html>

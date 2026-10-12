@@ -1,116 +1,109 @@
-# plan.md — Plan técnico de implementación Kubit-WMS (MVP)
+# plan.md — Plan tecnico de implementacion Kubit-WMS (MVP)
 
-> **Cómo.** Arquitectura, estructura y decisiones técnicas derivadas de `07-wms-spec.md`, `constitution.md` y el **AGENTS.md raíz de Kubit**.
+> **Como.** Arquitectura, estructura y decisiones tecnicas derivadas de `07-wms-spec.md` (v11), `constitution.md` y el **AGENTS.md raiz de Kubit**.
+> Ultima actualizacion: 2026-10-06 (paso C4, cierre de la Fase C) — estructura final del MVP, funciones (19), capa de datos y decisiones de pantalla de la Fase C.
 
 ## 1. Stack (confirmado en Kubit — no reabrir)
-- **Frontend:** HTML semántico + **Tailwind CSS vía CDN** + **JavaScript vanilla** (IIFE por página). Sin SPA, sin TypeScript, sin build. Navegación tradicional (`<a href>`).
-- **Backend/DB:** PostgreSQL 15+ vía **Supabase** (plan gratuito). Cliente `supabase-js`. Sin ORM.
-- **API:** Supabase Data API (**PostgREST**) REST directa. Transacciones → **funciones Postgres** con `.rpc()`. Sin Edge Functions en producción.
-- **Auth:** Supabase Auth (`window.KubitAuth`).
-- **PWA:** `manifest.json` + `service-worker.js` (patrón POS/Store).
-- **Testing:** vitest + jsdom.
-- **Hosting:** Vercel (plan gratuito).
+- **Frontend:** HTML semantico + **Tailwind CSS via CDN** + **JavaScript vanilla** (IIFE por pagina). Sin SPA, sin TypeScript, sin build. Fuente Poppins.
+- **Backend/DB:** PostgreSQL 15+ via **Supabase** (plan gratuito). Sin ORM.
+- **Cliente de datos:** `js/supabase.js` propio de Kubit (`fetch` directo, **no** supabase-js).
+- **API:** PostgREST. Transacciones → funciones Postgres via `rpc()`. Sin Edge Functions en produccion.
+- **Auth:** Supabase Auth + `window.KubitAuth` (copia sin cambios del POS).
+- **PWA:** `manifest.json` + `service-worker.js`. **Testing:** vitest + jsdom. **Hosting:** Vercel `kubit-wms-calidad`.
 
-## 2. Estructura de archivos (coherente con ARCHITECTURE.md del monorepo)
+## 2. Estructura de archivos (MVP completo)
+
 ```
-/specs/
-  ├── 07-wms-spec.md         # Especificación funcional (fuente de verdad)
-  └── 08-wms-schema.sql      # DDL de tablas wms_* (patrón de 02-database-schema.sql)
+/specs/                        (raiz del monorepo)
+  ├── 07-wms-spec.md           # v11
+  ├── 08-wms-schema.sql
+  ├── 09-wms-functions.sql     # v2
+  ├── 10-wms-solo-lectura.sql  # CR1, CR2, CR3
+  └── 11-wms-conteo-sobrante.sql  # IN2
 
 /apps/wms/
-  ├── index.html             # Dashboard
-  ├── inventario.html        # Inventario general / ubicar
-  ├── buscar.html            # Buscar producto
-  ├── despachar.html         # Despacho de ventas
-  ├── traslados.html
-  ├── reconciliacion.html
-  ├── baja.html
-  ├── config.html            # Bodegas y contenedores
-  ├── vercel.json            # rewrites (patrón POS)
-  ├── manifest.json
-  ├── service-worker.js      # cache-first (wms-YYYYMMDD-NN)
-  ├── css/estilo.css
+  ├── AGENTS.md, PROMPT.md, ralph.sh, README.md, memory/, specs/   # NO se publican (.vercelignore)
+  │     specs/despliegue-produccion.md (v4) · specs/produccion/P1-prechequeo.sql · P9-rollback.sql
+  ├── index.html · diagnostico.html · login.html
+  ├── buscar.html · ubicar.html · config.html                          # Fase A
+  ├── despachar.html · traslados.html · panel.html                     # Fase B
+  ├── ajustes.html · inventario.html · reconciliacion.html             # Fase C
+  ├── manifest.json · service-worker.js (vigente: 20261006-02)
+  ├── css/ estilo.css (copia del POS) · wms.css
+  ├── img/
   └── js/
-      ├── config.js          # credenciales Supabase (QA)
-      ├── supabase.js        # cliente REST
-      ├── compartido/
-      │   ├── database.js    # window.DB.wms.* (CRUD + .rpc())
-      │   ├── auth.js        # window.KubitAuth + poblarUserHeader()
-      │   └── sidebar.js
-      └── paginas/
-          ├── inventario.js
-          ├── buscar.js
-          ├── despachar.js
-          ├── traslados.js
-          ├── reconciliacion.js
-          ├── baja.js
-          └── config.js
-
-/tests/wms/                  # pruebas *.test.js (vitest + jsdom)
-  ├── codigos.test.js
-  ├── stock.test.js
-  ├── reconciliacion.test.js
-  └── flujos.test.js
+      ├── config.js            # CREDENCIALES DE PRUEBAS — NUNCA a produccion
+      ├── supabase.js          # copia exacta del POS
+      ├── compartido/  database.js · auth.js · layout.js · fecha.js · ubicacion-vista.js
+      └── paginas/     login · buscar · ubicar · config · despachar · traslados · panel · ajustes · inventario · reconciliacion
 ```
 
-## 3. Modelo de datos (tablas `wms_*`)
-Según `07-wms-spec.md` §4.2. Cinco tablas: `wms_bodegas`, `wms_ubicaciones` (árbol `parent_id`), `wms_stock_ubicacion` (núcleo), `wms_movimientos` (ledger), `wms_conteos`.
+## 3. Modelo de datos — ✅ ejecutado en pruebas 2026-09-28
+Tablas `wms_bodegas`, `wms_ubicaciones`, `wms_stock_ubicacion`, `wms_movimientos`, `wms_conteos`; el `09` agrega `wms_pos_linea_base`. Ninguna fase posterior agrego tablas.
 
-### Decisiones "No Reabrir" aplicadas
-- PK UUID v4 `gen_random_uuid()`; `timestamptz` default `now()`; `updated_at` vía trigger `update_updated_at()`; `deleted_at` nullable.
-- **Estados como strings con CHECK constraint** (NO ENUMs):
-  - `wms_stock_ubicacion.estado_fase` CHECK IN (`'SIN_UBICAR','UBICADO','RESERVADO','DESPACHADO','BAJA'`).
-  - `wms_ubicaciones.tipo` CHECK IN (`'ESTANTERIA','ENTREPANO','CAJA','CANASTILLA','BOLSA','SUELTO'`).
-  - `wms_movimientos.tipo_movimiento` CHECK IN (`'ENTRADA','UBICACION','TRASLADO','RESERVA','DESPACHO','AJUSTE','BAJA','LIBERACION'`).
-- **RLS** habilitado + políticas por rol; **grants** explícitos (`anon`, `authenticated`, `service_role`).
-- Todas las FK **indexadas**. Auditoría → `pos_usuarios`. Zona horaria America/Bogota.
+## 4. Funciones RPC (19 = 11 `_wms_` + 8 `wms_`)
 
-## 4. Transacciones atómicas (funciones Postgres via `.rpc()`)
-Para garantizar atomicidad (Artículo 5) sin servidor propio, las operaciones stock+movimiento se implementan como **funciones PL/pgSQL** en Supabase, invocadas desde `database.js` con `supabase.rpc()`:
-- `wms_recibir(ref_pos_compra_id, items)` → +SIN_UBICAR + ENTRADA (idempotente).
-- `wms_ubicar(producto_detalle_id, ubicacion_id, cantidad)` → SIN_UBICAR→UBICADO + UBICACION.
-- `wms_reservar(ref_pos_venta_id, items)` → →RESERVADO + RESERVA (idempotente).
-- `wms_despachar(...)` → RESERVADO→DESPACHADO + DESPACHO.
-- `wms_liberar(ref_pos_venta_id)` → RESERVADO→UBICADO/SIN_UBICAR + LIBERACION.
-- `wms_trasladar(producto_detalle_id, origen_id, destino_id, cantidad)` → TRASLADO.
-- `wms_ajustar(producto_detalle_id, delta, ubicacion_id?)` → AJUSTE + propaga a `pos_movimientos_inventario`.
-- `wms_dar_baja(producto_detalle_id, ubicacion_id, cantidad)` → BAJA + `merma` en POS.
+| Funcion | Archivo | Pantalla | Estado |
+|---|---|---|---|
+| `wms_inicializar()` | `09` | — (una vez) | ✅ |
+| `wms_sincronizar()` / `_wms_procesar_evento` | `09` → `10` | todas las que sincronizan | ✅ (CR1, CR2) |
+| `wms_ubicar()` | `09` | Ubicar | ✅ |
+| `wms_trasladar()` | `09` | Traslados | ✅ |
+| `wms_despachar()` | `09` | Despachar | ✅ |
+| `wms_resolver_decremento(mov, codigo?)` | `10` | Bajas y ajustes | ✅ |
+| `wms_registrar_conteo()` | `10` | Inventario | ✅ (CR3) |
+| `wms_cerrar_sobrante(conteo, accion)` | `11` | Inventario | ✅ (IN2) |
+| ~~`wms_ajustar`~~, ~~`wms_dar_baja`~~, ~~`_wms_ajuste_pos`~~ | eliminadas en `10` | — | CR1 |
+| `wms_liberar()` | — | — | ⏸ diferida (D2) |
+
+Verificacion CR1: consultas A y B = 0 filas, C = 19 (ver `despliegue-produccion.md`, bloque V). Orden obligatorio: `08 → 09 → 10 → 11`.
 
 ## 5. Capa de datos (`js/compartido/database.js`)
-- Objeto global `window.DB.wms.*` (patrón `DatabaseService` del POS: IIFE + caché en memoria con Map).
-- Lecturas: `supabase.from('wms_...').select()` con embeds PostgREST.
-- Escrituras transaccionales: `supabase.rpc('wms_...', {...})`.
-- Sincronización bajo demanda: consultas a `pos_compras`/`pos_ventas`/`pos_movimientos_inventario` filtrando lo que **no** tiene `ref_pos_*` en `wms_movimientos`.
+- **Formato:** `{ data, error }`. **CR1:** sin `post`/`patch`/`delete` sobre `pos_*`/`st_*`. **C1:** escritura directa solo en `wms_bodegas` y `wms_ubicaciones`.
 
-## 6. Validación de códigos (`js/codigos.js`)
-- Parser `B CC PP` (regex `^[1-9]\d{4}$`) → `{ bodega, contenedor, tipoContenedor, posicion, tipoPosicion }`.
-- El **tipo real** se resuelve contra `wms_ubicaciones.tipo` (fuente de verdad), no solo por rango.
+| Grupo | Metodos |
+|---|---|
+| Generico | `select`, `rpc` |
+| Catalogo (lectura POS) | `productos.buscar`, `productos.porIds` |
+| Maestros | `wms.bodegas`, `ubicaciones`, `ubicacionPorCodigo`, `rutas`, `detalleUbicaciones`, `crearBodega`, `crearUbicacion`, `actualizarUbicacion` |
+| Stock y control (lectura) | `wms.stockDetalle`, `stockPorSkus`, `stockEnUbicaciones`, `stockEnContenedor`, `reconciliacion`, `posPendientes`, `salidasPendientes`, `conteosAbiertos`, `despachoPendiente`, `bandejaDespacho` |
+| Operaciones (RPC) | `wms.sincronizar`, `ubicar`, `trasladar`, `despachar`, `resolverDecremento`, `registrarConteo`, `cerrarSobrante` |
 
-## 7. PWA y UI (05-ui-ux-system.md)
-- Modo oscuro por defecto (`class="dark"` + anti-flash). Paleta **Slate**. Header fijo `pt-16`. Sidebar como POS.
-- Service worker: rutas relativas, cache-first + fallback, versioning `wms-YYYYMMDD-NN`, bypass en localhost, `ignoreSearch:true`.
-- `auth.js::poblarUserHeader()` con IDs `user-avatar`, `user-name`, `user-rol`.
+## 6. Codigos y contenedores (decision P1)
+Formato `B CC PP` (`07-wms-spec.md` §15). Solo se ubica, traslada, cuenta o descuenta en contenedores con `es_hoja = true` y activos. Pendiente: `js/codigos.js` (T-201).
 
-## 8. Pruebas (vitest + jsdom, patrón del repo)
-- **Unitarias:** `codigos.test.js`, `stock.test.js` (transiciones), `reconciliacion.test.js`.
-- **Flujos:** `flujos.test.js` cubre HU-01…HU-08 verificando el invariante tras cada operación.
-- **Idempotencia:** reejecutar recibir/reservar no duplica.
-- Mocks de `window.__supabase`, `window.KubitAuth`, `localStorage` (patrón `tests/setup.js`).
+## 7. UI y navegacion
+- Modo oscuro por defecto, paleta Slate, header fijo, cards, toast superior, texto en ASCII plano.
+- **Contrato de pagina protegida:** `<body data-pagina data-titulo>`, `<main id="contenido" class="invisible">`; scripts `config` → `supabase` → `database` → `auth` → `layout` → (`fecha`) → (`ubicacion-vista`) → pagina.
+- **Menu:** barra inferior (Buscar · Ubicar · Despachar · Mas); "Mas" con Traslados, Panel, Inventario, Reconciliacion, Bajas y ajustes, Configuracion. **Todo disponible** desde C3.
+- **Z1** fechas en America/Bogota; **V1** formato de ubicacion; **CR1** ninguna pantalla crea ajustes ni bajas.
+- Decisiones de pantalla: U1 (Ubicar), DB1/DB2 (Despachar), T1/T2/T3 (Traslados), PN1/PN2 (Panel), AJ1 (Bajas y ajustes), IN1/IN2/IN3 (Inventario), RC1 (Reconciliacion: solo lectura, causa y enlace; diferencia como POS − WMS en todas las pantallas).
 
-## 9. Orden de construcción (detalle en tasks.md)
-1. Estructura `apps/wms` + `config.js` + `service-worker.js` + `manifest.json` + layout Slate/dark.
-2. `08-wms-schema.sql`: tablas + CHECK + índices + trigger + RLS + grants.
-3. `codigos.js` + pruebas.
-4. Funciones `.rpc()` atómicas + pruebas de flujo.
-5. `database.js` (DB.wms.*) + lectura bajo demanda del POS.
-6. Pantallas: Config → Inventario/Ubicar → Buscar → Despachar → Traslados → Reconciliación → Baja → Dashboard.
-7. Endurecimiento (idempotencia, atomicidad, invariante) + PWA offline básica.
+## 8. Pruebas
+Pruebas manuales por paso en `fix_plan.md` (todas aprobadas al 2026-10-06) y pruebas con datos simulados en Node antes de cada entrega. Pendientes: automatizadas (T-201, T-508, T-309).
+
+## 9. Plan por fases — estado final del MVP
+
+| Fase | Pasos | Estado |
+|---|---|---|
+| Base de datos | `08`, `09` v2, inicializacion | ✅ 2026-09-28/29 |
+| A — Base y ubicacion | A0–A8, V1 | ✅ 2026-10-01 |
+| B — Operacion diaria | B0–B7 (Despachar, Traslados, Panel) | ✅ 2026-10-02 |
+| C — Control | C0 (`10`), C1 (Bajas y ajustes), C2 (`11`, Inventario), C3 (Reconciliacion), C4 (cierre) | ✅ 2026-10-06 (C4: publicacion pendiente del usuario) |
+| Produccion | `despliegue-produccion.md` v4 | Sin fecha |
+| Posterior | D2 (anulaciones), RC2/T-521, T-515, endurecimiento (Epica 5) | Por priorizar |
 
 ## 10. Local y despliegue
-- **Local (Windows):** `npx http-server apps/wms -p 3000` (no `npx serve`).
-- **Deploy:** Vercel (skill `deploy-to-vercel`), solo si el usuario lo pide. **Sin commits automáticos.**
+- Local: `npx http-server apps/wms -p 3001 -c-1` desde la raiz de `KUBIT-Pruebas`.
+- GitHub `KUBIT-Pruebas` → Vercel `kubit-wms-calidad` (Root `apps/wms`, Framework "Other", sin build).
+- Antes de cada commit: revisar cabeceras, existencia de `ASSETS` y secretos.
+- Produccion: `apps/wms/specs/despliegue-produccion.md` (v4).
 
-## 11. Riesgos técnicos
-- Consistencia POS↔WMS bajo demanda → mitigada con panel de reconciliación explícito.
-- Atomicidad en cliente vanilla → resuelta moviendo la lógica a funciones Postgres `.rpc()`.
-- Límite 50 canastillas/bodega → validación blanda; `tipo` manda sobre el rango.
+## 11. Riesgos tecnicos
+- Consistencia POS↔WMS bajo demanda → Reconciliacion y Panel.
+- Token sin renovacion (~1 h) → T-507.
+- Service worker: un archivo inexistente en `ASSETS` impide instalarlo.
+- Contenedores creados por error no se borran desde la app (T-509).
+- R-B1 (T-515), R-C1, R-C2, R-C3 (RC2/T-521).
+- Salida de un solo origen (T-518); sobrante leido de la observacion (T-520); totales del Panel en el navegador (T-517).
+- Bugs del POS que afectan al WMS: ver `fix_plan.md`.

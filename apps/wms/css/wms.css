@@ -1,0 +1,77 @@
+/* ============================================================
+   wms.css — Estilos propios de Kubit-WMS
+   Se carga DESPUES de estilo.css (copia sin cambios del POS).
+   Aqui solo va lo que el POS no tiene: barra inferior, panel "Mas"
+   (bottom sheet), zona segura del celular y toast del layout.
+   ============================================================ */
+
+/* ---------- Zona segura (iPhone / Android con gestos) ---------- */
+.wms-safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Espacio para que el contenido no quede bajo la barra inferior (< lg) */
+.wms-main {
+  padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
+}
+@media (min-width: 1024px) {
+  .wms-main {
+    padding-bottom: 2rem;
+  }
+}
+
+/* ---------- Barra inferior ---------- */
+.wms-tab {
+  -webkit-tap-highlight-color: transparent;
+  min-height: 3.5rem;            /* area tactil comoda */
+}
+.wms-tab[aria-disabled="true"] {
+  opacity: .4;
+  pointer-events: none;
+}
+
+/* ---------- Panel "Mas" (bottom sheet) ---------- */
+#wms-sheet-fondo {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .2s ease;
+}
+#wms-sheet-fondo.abierto {
+  opacity: 1;
+  pointer-events: auto;
+}
+#wms-sheet {
+  transform: translateY(100%);
+  transition: transform .25s ease;
+}
+#wms-sheet.abierto {
+  transform: translateY(0);
+}
+body.wms-sin-scroll {
+  overflow: hidden;
+}
+
+/* ---------- Opciones aun no disponibles ---------- */
+.wms-item-pronto {
+  opacity: .45;
+  cursor: default;
+}
+
+/* ---------- Toast (ids usados por mostrarToast en database.js) ---------- */
+#toast {
+  position: fixed;
+  top: 1rem;
+  left: 50%;
+  z-index: 60;
+  width: calc(100% - 2rem);
+  max-width: 24rem;
+  transform: translate(-50%, -150%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform .25s ease, opacity .25s ease;
+}
+#toast.show {
+  transform: translate(-50%, 0);
+  opacity: 1;
+  pointer-events: auto;
+}

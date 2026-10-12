@@ -1,14 +1,17 @@
-## Especificación del Módulo WMS - Kubit (Draft para SDD) — v6
+## Especificación del Módulo WMS - Kubit (SDD) — v11
 
-> **Estado:** Especificación funcional cerrada. Nomenclatura de códigos definida (sección 15). Lista para montar en SDD.
-> **Ubicación en el repo:** `specs/07-wms-spec.md` (el `06` está ocupado por `06-servicio-correo.md`).
-> **Objetivo:** Alinear el WMS al modelo de ventas de Outletshop y al ecosistema Kubit (POS + Store)سobre Supabase.
+> **Estado:** **MVP funcional completo en pruebas.** Base de datos (`08`, `09` v2, `10`, `11`) y Fases A, B y C cerradas; publicado en Vercel `kubit-wms-calidad`. Plan de producción documentado, sin fecha.
+> **Ubicación en el repo:** `specs/07-wms-spec.md` (el `06` es `06-servicio-correo.md`).
 >
-> **Cambios v6:**
-> - **Numeración corregida a `07`** (`07-wms-spec.md`); el DDL asociado será `08-wms-schema.sql`.
-> - **Paleta UI Slate** (monocromático, modo oscuro por defecto), consistente con `05-ui-ux-system.md`.
-> - Alineación con decisiones "No Reabrir" de Kubit: **estados como CHECK constraints con strings (no ENUMs)**, PK UUID v4, `timestamptz`, trigger `update_updated_at()`, RLS + grants explícitos.
-> - Stack confirmado: **HTML + Tailwind (CDN) + JS vanilla + Supabase (PostgREST/.rpc())**. Sin frameworks SPA, sin build.
+> **Cambios v11 (2026-10-06):**
+> - **Fase C cerrada:** Bajas y ajustes (CR2, AJ1), Inventario (CR3, IN1, IN2, IN3) y Reconciliación (RC1).
+> - Nuevo script `11-wms-conteo-sobrante.sql` (`wms_cerrar_sobrante`). Orden obligatorio `08 → 09 → 10 → 11` (§4.4).
+> - Conteo con unidades reservadas (IN1) y cierre del sobrante (IN2) (§5.10). Reconciliación de solo lectura (§5.12).
+> - Incidente I-1 y regla de verificación de scripts (§8, §14). Decisión pendiente RC2 (§12).
+>
+> **Cambios v10:** CR1 (solo lectura sobre `pos_*`/`st_*`), CR2, CR3, script `10`, Fase B cerrada.
+> **Cambios v9:** Fase A cerrada; V1; U1; DB1, DB2, T1, PN1; R-B1.
+> **Cambios v8:** P1, bodegas hasta 9, B1, B2, C1. **v7:** D1–D6, regla del conteo, D2 diferida. **v6:** numeración `07`, Slate, stack.
 
 ---
 
@@ -16,394 +19,318 @@
 
 El módulo **WMS** (`apps/wms`) controla **la ubicación física de cada producto y su estado** dentro del almacén. Complementa, sin reemplazar, el inventario del POS.
 
-- **POS = capa contable:** *"¿cuánto stock hay?"* → `pos_productos_detalle.stock_actual`.
+- **POS = capa contable y único dueño del stock:** *"¿cuánto hay?"* → `pos_productos_detalle.stock_actual`.
 - **WMS = capa física:** *"¿en qué bodega y contenedor está?"* → tablas `wms_*`.
 
-El WMS es un **registro de ubicaciones sincronizado al stock del POS**: el POS manda el "cuánto"; el WMS administra el "dónde".
+**El WMS nunca modifica el POS ni la Tienda (CR1).**
 
 #### 1.1 Contexto físico (Outletshop)
-**3 bodegas**, cada una con **dos formas de almacenamiento**:
-
 | # | Bodega | Descripción |
 |---|---|---|
-| 1 | **Bodega Hogar/Limpieza** | Espacio del apartamento; **solo se gestiona el inventario de venta** (se ignoran los productos personales de limpieza). |
+| 1 | **Bodega Hogar/Limpieza** | Solo se gestiona el inventario de venta. |
 | 2 | **Mini Cuarto Útil** | Sector pequeño del apartamento. |
-| 3 | **Cuarto Útil Grande** | Cuarto útil recién comprado, para crecer. |
+| 3 | **Cuarto Útil Grande** | Tiene la **única estantería**, con 5 entrepaños. |
 
-**Dos paradigmas (coexisten en cada bodega):**
-- **Estantería → Nivel/Entrepaño → Caja:** cada caja = 1 SKU (mono-SKU).
-- **Canastilla → Bolsa:** canastilla = varios SKU (multi-SKU); bolsa = 1 SKU (mono-SKU); también admite producto **suelto**.
+Se pueden crear más bodegas, hasta 9. **Puestos:** canastilla en el piso (bolsas y zona suelta) o entrepaño de la estantería (cajas y zona suelta). Las canastillas nunca van sobre la estantería.
 
-#### 1.2 Requerimientos
-1. Ubicar productos en cualquier bodega/contenedor, **durante el Inventario general**, según necesidad.
-2. Buscar un producto y darle salida desde su ubicación, o despacharlo **sin ubicar**.
-3. **Mover productos entre bodegas y entre unidades de almacenamiento** (traslados).
-4. Ajustarse al modelo de ventas de Outletshop.
+#### 1.2 Alcance funcional (MVP)
+Multi-bodega; stock físico por contenedor y estado; recepción, ubicación, búsqueda, despacho (con o sin ubicación, venta completa), traslados, inventario general, bajas y ajustes recibidos del POS, panel y reconciliación. **Solo productos físicos** (§1.3). **Solo lectura sobre `pos_*` y `st_*`** (CR1).
 
-#### 1.3 Alcance Funcional (MVP)
-- Multi-bodega con árbol de contenedores (estantería/entrepaño/caja y canastilla/bolsa/suelto).
-- Stock físico por contenedor y estado (`wms_stock_ubicacion`).
-- **Inventario general**: contar y ubicar según necesidad.
-- Movimientos: entrada lógica, ubicación, **traslado**, despacho, ajuste, baja por avería, liberación.
-- Sincronización con POS por **lectura bajo demanda**.
-- Búsqueda *"¿dónde está el SKU X?"* con ruta completa.
-- Despacho **con o sin ubicación** previa.
-- Reportes: stock por bodega/contenedor, contenedores vacíos, diferencias físicas vs. lógicas.
+#### 1.3 Productos gestionados (D5)
+| `pos_productos.tipo_producto` | ¿En el WMS? |
+|---|---|
+| `'Fisico'` | Sí |
+| `NULL` | Sí (se trata como físico) |
+| `'Digital'` | **No** |
 
 #### 1.4 Dependencias
-- **DB:** Supabase (plan gratuito), esquema `public`; prefijo `wms_*`. Referencia `pos_productos_detalle`, `pos_usuarios`.
-- **Stack:** HTML + Tailwind (CDN) + JavaScript vanilla + `supabase-js` (PostgREST). Transacciones vía funciones Postgres `.rpc()`. Sin frameworks SPA, sin TypeScript, sin build.
-- **Catálogo:** el WMS **nunca crea productos**; solo referencia `producto_detalle_id`.
-- **UI:** sistema de diseño Kubit (`05-ui-ux-system.md`): **monocromático Slate, modo oscuro por defecto**, **mobile-first / PWA**, **entrada manual** de códigos.
-- **Infra:** Vercel (plan gratuito).
+- **DB:** Supabase (plan gratuito), esquema `public`; prefijo `wms_*`. **Lee** `pos_productos`, `pos_productos_detalle`, `pos_usuarios`, `pos_ventas`, `pos_compras`, `pos_movimientos_inventario`, `pos_configuracion_empresa`.
+- **Stack:** HTML + Tailwind (CDN) + JavaScript vanilla + cliente propio `supabase.js`. Sin SPA, sin TypeScript, sin build.
+- **UI:** `05-ui-ux-system.md`: Slate, modo oscuro por defecto, mobile-first / PWA, entrada manual de códigos.
+- **Infra:** Vercel (plan gratuito), proyecto `kubit-wms-calidad`.
 
 ---
 
 ### 2. Arquitectura e Integración
 
-#### 2.1 Fuente de verdad
-| Dato | Fuente | Módulo |
+#### 2.1 Fuente de verdad y regla de solo lectura (CR1)
+| Dato | Fuente | El WMS… |
 |---|---|---|
-| Catálogo, precios, stock total | `pos_productos*`, `pos_productos_detalle.stock_actual` | POS |
-| Bitácora contable | `pos_movimientos_inventario` | POS |
-| **Ubicación física / estado** | **`wms_stock_ubicacion`** | **WMS** |
-| **Movimientos físicos** | **`wms_movimientos`** | **WMS** |
+| Catálogo, stock total | `pos_productos*`, `stock_actual` | **Solo lee** |
+| Estado de cada venta | `pos_ventas.estado` | **Solo lee** |
+| Eventos contables | `pos_movimientos_inventario` | **Solo lee** (sin bloquear filas) |
+| Tienda Virtual | `st_*` | No usa |
+| Bodegas y contenedores | `wms_bodegas`, `wms_ubicaciones` | Lee y escribe (maestros, C1) |
+| Ubicación física / estado | `wms_stock_ubicacion` | Solo por funciones |
+| Movimientos y conteos | `wms_movimientos`, `wms_conteos` | Solo por funciones |
 
-#### 2.2 Estados del stock en el WMS
-| Estado | ¿`ubicacion_id`? | ¿Cuenta en `pos.stock_actual`? | Significado |
+Ninguna función ni pantalla del WMS ejecuta `INSERT`, `UPDATE`, `DELETE` ni `SELECT ... FOR UPDATE` sobre `pos_*` o `st_*`. Todo cambio del stock contable **se registra en el POS**. Verificable con las consultas A y B (§8).
+
+#### 2.2 Estados del stock
+| Estado | ¿`ubicacion_id`? | ¿Cuenta en `stock_actual`? | Significado |
 |---|---|---|---|
-| `SIN_UBICAR` | **No (NULL)** | Sí | Existe en stock pero sin contenedor asignado. **Lógico, no físico.** |
-| `UBICADO` | Sí | Sí | Asignado a un contenedor real. |
-| `RESERVADO` | Opcional | No | Vendido en POS (marcado en la venta), pendiente de despacho. |
-| `DESPACHADO` | — | No | Salió físicamente. |
-| `BAJA` | — | No | Producto averiado retirado. |
-
-> Los estados se almacenan como **strings con CHECK constraint** (no ENUMs), según convención de Kubit.
-> Un producto recibido y vendido de inmediato viaja `SIN_UBICAR → RESERVADO → DESPACHADO` **sin pasar por ubicación física**.
+| `SIN_UBICAR` | No | Sí | Existe sin contenedor (lógico) |
+| `UBICADO` | Sí | Sí | En un contenedor |
+| `RESERVADO` | Opcional | No | Vendido; **sigue físicamente en el contenedor** hasta despacharlo |
+| `DESPACHADO` | — | No | Salió |
+| `BAJA` | — | No | Averiado (merma registrada en el POS) |
 
 #### 2.3 Invariante de reconciliación
 ```
-pos_productos_detalle.stock_actual
-   == SUM( wms_stock_ubicacion.cantidad )
-      WHERE producto_detalle_id = X
-        AND estado_fase IN ('SIN_UBICAR', 'UBICADO')
+pos_productos_detalle.stock_actual(X)
+   == SUM(wms_stock_ubicacion.cantidad) WHERE producto = X AND estado IN ('SIN_UBICAR','UBICADO')
 ```
+Se verifica con `wms_v_reconciliacion` y la pantalla Reconciliación. Una diferencia se corrige **registrando el movimiento en el POS**.
 
-#### 2.4 Sincronización — MVP: lectura bajo demanda (sin triggers)
-El WMS consulta al POS al abrir cada bandeja y **compara** `stock_actual` contra su conteo (`SIN_UBICAR + UBICADO`); las diferencias se resuelven en un panel de reconciliación. Idempotencia por `ref_pos_*`.
+#### 2.4 Sincronización — lectura bajo demanda
+- **Arranque (una vez):** `wms_inicializar()` carga el stock físico como `SIN_UBICAR` y registra la línea base.
+- **Operación:** `wms_sincronizar()` procesa en orden de fecha los eventos no procesados; se ejecuta al abrir Buscar, Ubicar, Despachar, Panel, Bajas y ajustes, Inventario y Reconciliación.
+- **Idempotencia (D1)** por `ref_pos_movimiento_id`; exclusión con candado propio (`pg_advisory_xact_lock`); un evento que falla queda **PENDIENTE** con su motivo.
 
----
-
-### 3. Jerarquía física (árbol de contenedores)
-Árbol auto-referenciado (`wms_ubicaciones.parent_id`):
-```
-Bodega
-  ├── Estantería → Entrepaño → Caja     (1 SKU por caja)
-  └── Canastilla (varios SKU) → Bolsa   (1 SKU por bolsa)
-                              └ Suelto   (producto sin bolsa dentro de la canastilla)
-```
-Stock `UBICADO` vive en el **contenedor hoja** (`es_hoja=true`). Cada contenedor lleva su `codigo` numérico (sección 15).
-
----
-
-### 4. Modelo de Datos (`wms_*`)
-
-#### 4.1 Convenciones (decisiones "No Reabrir" de Kubit)
-Prefijo `wms_`; esquema `public`; PK UUID v4 (`gen_random_uuid()`); `timestamptz` default `now()`; `updated_at` vía trigger `update_updated_at()`; soft delete `deleted_at`; auditoría `created_by`/`updated_by` → `pos_usuarios`; FK indexadas; **estados como CHECK strings**; RLS + grants explícitos (`anon`, `authenticated`, `service_role`); catálogo por `producto_detalle_id`.
-
-#### 4.2 Diagrama Entidad-Relación
-```mermaid
-erDiagram
-    wms_bodegas {
-        string id PK
-        string codigo "1 | 2 | 3"
-        string nombre
-        text descripcion
-        boolean activo
-        timestamp created_at
-        timestamp updated_at
-        string created_by FK
-        string updated_by FK
-        timestamp deleted_at
-    }
-    wms_ubicaciones {
-        string id PK
-        string bodega_id FK
-        string parent_id FK "wms_ubicaciones (auto-referencia)"
-        string tipo "CHECK: ESTANTERIA|ENTREPANO|CAJA|CANASTILLA|BOLSA|SUELTO"
-        string codigo "5 digitos numericos (ver seccion 15)"
-        string nombre
-        boolean es_hoja "true si aloja stock"
-        boolean mono_sku "true=CAJA/BOLSA, false=CANASTILLA/ENTREPANO/SUELTO"
-        string producto_detalle_id FK "opcional: fija SKU si mono_sku"
-        boolean activo
-        timestamp created_at
-        timestamp updated_at
-        string created_by FK
-        string updated_by FK
-        timestamp deleted_at
-    }
-    wms_stock_ubicacion {
-        string id PK
-        string producto_detalle_id FK "pos_productos_detalle"
-        string ubicacion_id FK "NULL si SIN_UBICAR"
-        string bodega_id FK "NULL si SIN_UBICAR"
-        string estado_fase "CHECK: SIN_UBICAR|UBICADO|RESERVADO|DESPACHADO|BAJA"
-        int cantidad
-        timestamp created_at
-        timestamp updated_at
-        string created_by FK
-        string updated_by FK
-        timestamp deleted_at
-    }
-    wms_movimientos {
-        string id PK
-        string producto_detalle_id FK
-        string tipo_movimiento "CHECK: ENTRADA|UBICACION|TRASLADO|RESERVA|DESPACHO|AJUSTE|BAJA|LIBERACION"
-        int cantidad
-        string bodega_origen_id FK
-        string bodega_destino_id FK
-        string ubicacion_origen_id FK
-        string ubicacion_destino_id FK
-        string fase_origen
-        string fase_destino
-        string ref_pos_movimiento_id
-        string ref_pos_compra_id
-        string ref_pos_venta_id
-        string motivo
-        text notas
-        timestamp fecha
-        string created_by FK
-        timestamp updated_at
-        timestamp deleted_at
-    }
-    wms_conteos {
-        string id PK
-        string sesion_inventario_id
-        string ubicacion_id FK
-        string producto_detalle_id FK
-        int cantidad_sistema
-        int cantidad_fisica
-        int diferencia
-        string estado "CHECK: ABIERTO|AJUSTADO"
-        text observaciones
-        timestamp created_at
-        timestamp updated_at
-        string created_by FK
-        timestamp deleted_at
-    }
-
-    wms_bodegas ||--o{ wms_ubicaciones : "bodega_id"
-    wms_ubicaciones ||--o{ wms_ubicaciones : "parent_id"
-    wms_ubicaciones ||--o{ wms_stock_ubicacion : "ubicacion_id"
-    wms_bodegas ||--o{ wms_stock_ubicacion : "bodega_id"
-    wms_ubicaciones ||--o{ wms_movimientos : "ubicacion_origen_id"
-    wms_ubicaciones ||--o{ wms_movimientos : "ubicacion_destino_id"
-    wms_ubicaciones ||--o{ wms_conteos : "ubicacion_id"
-```
-
-#### 4.3 Catálogo de tablas (MVP)
-| Tabla | Propósito |
+| Evento POS | Acción WMS |
 |---|---|
-| `wms_bodegas` | Las 3 bodegas |
-| `wms_ubicaciones` | Árbol de contenedores |
-| `wms_stock_ubicacion` | Stock físico por contenedor y estado (núcleo) |
-| `wms_movimientos` | Bitácora de movimientos físicos |
-| `wms_conteos` | Inventario general / ajustes |
+| `entrada_compra` | `ENTRADA`: + `SIN_UBICAR` |
+| `ajuste_incremento` | `AJUSTE`: + `SIN_UBICAR` |
+| `salida_venta` | `RESERVA`: `UBICADO`/`SIN_UBICAR` → `RESERVADO` (todo o nada) |
+| `ajuste_decremento` | **CR2:** sin unidades ubicadas → − `SIN_UBICAR`; con unidades ubicadas → **pendiente** (se resuelve en Bajas y ajustes) |
+| `merma` | **CR2:** igual que el anterior, terminando en `BAJA` |
+| Otros (anulaciones) | `NO_SOPORTADO` (D2) |
+
+#### 2.5 Resolución de referencias del POS (D6)
+Venta: por `referencia` (uuid o `numero_venta`) o por el número del motivo (`Venta #KBT-…`). Compra: `OC-<numero_orden>`, solo trazabilidad.
+
+---
+
+### 3. Jerarquía física (P1)
+```
+Bodega (1-9)
+  ├── Puesto CANASTILLA (piso)          B CC 00
+  │     ├── Bolsa        (1 producto)   B CC 01-90
+  │     └── Zona suelta  (varios)       B CC 91-99
+  └── Puesto ENTREPANO (estantería)     B CC 00
+        ├── Caja         (1 producto)   B CC 01-90
+        └── Zona suelta  (varios)       B CC 91-99
+```
+`CC` (01–99) es único en la bodega y se comparte entre canastillas y entrepaños. La estantería no se registra. El stock vive solo en el contenido (`es_hoja = true`). Mover una caja de entrepaño cambia su código.
+
+---
+
+### 4. Modelo de Datos
+
+#### 4.1 Convenciones
+Prefijos `wms_` (tablas), `wms_v_` (vistas), `wms_`/`_wms_` (funciones); PK UUID; `timestamptz`; `updated_at` por trigger; soft delete; auditoría → `pos_usuarios`; FK indexadas; estados como CHECK; RLS + grants.
+
+#### 4.2 Tablas
+| Tabla | Propósito | Escritura desde la app |
+|---|---|---|
+| `wms_bodegas` | Bodegas (hasta 9) | Directa (C1) |
+| `wms_ubicaciones` | Puestos y su contenido; `producto_detalle_id` fija el SKU en bolsas/cajas | Directa (C1) |
+| `wms_stock_ubicacion` | Stock por contenedor y estado | Solo `rpc()` |
+| `wms_movimientos` | Bitácora (`ENTRADA`, `UBICACION`, `TRASLADO`, `RESERVA`, `DESPACHO`, `AJUSTE`, `BAJA`, `LIBERACION`) | Solo `rpc()` |
+| `wms_conteos` | Conteos; `estado` `ABIERTO` = sobrante pendiente (CR3), `AJUSTADO` = cerrado | Solo `rpc()` |
+| `wms_pos_linea_base` | Movimientos POS anteriores al arranque | Ninguna |
+
+#### 4.3 Vistas
+`wms_v_reconciliacion` (diferencias), `wms_v_pos_pendientes` (eventos por procesar), `wms_v_ubicaciones_ruta`, `wms_v_stock_detalle`, `wms_v_despacho_pendiente`.
+
+#### 4.4 Scripts y funciones (orden obligatorio `08 → 09 → 10 → 11`)
+| Script | Contenido |
+|---|---|
+| `08-wms-schema.sql` | Tablas, índices, RLS, seed de bodegas 1–3, `wms_v_reconciliacion` |
+| `09-wms-functions.sql` v2 | Funciones y vistas. **Por sí solo escribe en el POS: el `10` va inmediatamente después**; nunca re-ejecutar el `09` después del `10` |
+| `10-wms-solo-lectura.sql` | Elimina `wms_ajustar`, `wms_dar_baja`, `_wms_ajuste_pos`; CR1, CR2, CR3 |
+| `11-wms-conteo-sobrante.sql` | `wms_cerrar_sobrante` (IN2) |
+
+| Función | Uso |
+|---|---|
+| `wms_inicializar()` | Arranque único |
+| `wms_sincronizar()` | Procesa eventos del POS |
+| `wms_ubicar()` · `wms_trasladar()` · `wms_despachar()` | Ubicar · Traslados · Despachar |
+| `wms_resolver_decremento(mov, codigo?)` | Bajas y ajustes: sin código = desde `SIN_UBICAR`; con código = desde ese contenedor |
+| `wms_registrar_conteo()` | Inventario (CR3) |
+| `wms_cerrar_sobrante(conteo, 'UBICAR'\|'DESCARTAR')` | Inventario (IN2) |
+
+Total: **19 funciones** (11 `_wms_` + 8 `wms_`).
 
 ---
 
 ### 5. Reglas de Negocio
 
 #### 5.1 Contenedores
-- `CAJA`/`BOLSA` = mono-SKU (fijan `producto_detalle_id` al recibir; libres al llegar a 0).
-- `CANASTILLA` = multi-SKU; admite varias `BOLSA` y zonas `SUELTO`.
-- `SUELTO` = zona lógica dentro de una canastilla para producto sin bolsa (multi-SKU permitido).
-- Jerarquía: `BOLSA/SUELTO→CANASTILLA`; `CAJA→ENTREPANO→ESTANTERIA→bodega`; `CANASTILLA` cuelga de bodega.
-- Sin control de capacidad ni bloqueos.
+Puestos sin stock; bolsa y caja mono-SKU (se liberan al vaciarse); zona suelta multi-SKU; sin capacidad. No se desactiva un contenedor con mercancía; desactivar un puesto desactiva su contenido.
 
-#### 5.2 Entrada (compra recibida en POS)
-Al leer una compra `RECIBIDA` (nueva `entrada_compra`), el WMS incrementa el pool `SIN_UBICAR` del SKU (mov. `ENTRADA`). **No exige ubicar.**
+#### 5.2 Entrada
+Cada `entrada_compra` suma a `SIN_UBICAR`. No exige ubicar.
 
-#### 5.3 Ubicación (Inventario general o a demanda)
-El usuario asigna `SIN_UBICAR → UBICADO` indicando el contenedor (mov. `UBICACION`). Un SKU puede repartirse en varios contenedores.
+#### 5.3 Ubicación
+`SIN_UBICAR → UBICADO` con el código del contenedor. Sincroniza al abrir y recuerda el último contenedor (U1).
 
-#### 5.4 Salida (venta en POS)
-- Venta `CONFIRMADA` (nueva `salida_venta`) → WMS marca `RESERVADO` (mov. `RESERVA`), de `UBICADO` o `SIN_UBICAR`.
-- Despacho (`RESERVADO → DESPACHADO`, mov. `DESPACHO`) **con o sin ubicación previa**; orden de salida indiferente.
+#### 5.4 Salida (venta en POS o Tienda — D4)
+Reserva primero de `UBICADO` y luego de `SIN_UBICAR` (todo o nada). Despacho de la **venta completa** (DB1), con casillas de ayuda (DB2). Ventas anuladas bloqueadas y re-verificadas antes de despachar (R-B1).
 
-#### 5.5 Anulación de venta en POS
-Venta anulada (POS revierte stock) → WMS **libera** (mov. `LIBERACION`): `RESERVADO → UBICADO`/`SIN_UBICAR`.
+#### 5.5 Anulación y edición de venta — **diferida (D2)**
+No se liberan reservas automáticamente; la anulación aparece como movimiento no soportado y como diferencia en Reconciliación.
+> Hallazgo en el POS: `ajustarStock()` sube el stock antes de insertar `'entrada_anulacion'` (no admitido por el CHECK) y no revisa el error.
 
-#### 5.6 Traslados (entre bodegas y contenedores)
-Mueve `UBICADO` de un contenedor a otro, misma bodega o **entre bodegas** (mov. `TRASLADO`). No cambia estado ni `stock_actual`.
+#### 5.6 Traslados
+`UBICADO → UBICADO`, misma bodega o entre bodegas; empieza por el origen (T1); sin sincronizar (T2); sin confirmación (T3). Lo `RESERVADO` no se traslada.
 
-#### 5.7 Ajustes de inventario del POS — impacto en el WMS
-Las **devoluciones y correcciones** se hacen en POS con `ajuste_incremento`/`ajuste_decremento`; el WMS reacciona al leer el nuevo `stock_actual`:
+#### 5.7 Ajustes (CR1)
+**Se registran siempre en el POS.** Ajuste +: entra a `SIN_UBICAR` y luego se ubica. Ajuste −: automático si el producto no está ubicado; si lo está, pendiente hasta elegir el origen en Bajas y ajustes (CR2, AJ1).
 
-| Ajuste en POS | Efecto | Acción del WMS |
-|---|---|---|
-| **Incremento (+)** | `stock_actual` sube | Agrega la diferencia al pool **`SIN_UBICAR`** (mov. `AJUSTE +`). |
-| **Decremento (−)** | `stock_actual` baja | Retira la diferencia: primero de **`SIN_UBICAR`**; si no alcanza, pide de qué contenedor descontar lo `UBICADO` (mov. `AJUSTE −`). |
+#### 5.8 Baja por avería (CR1)
+Se registra como **merma en el POS**; el WMS la pasa a `BAJA` (automática o eligiendo el origen, CR2).
 
-Sin aprobación (uso personal). Toda diferencia se muestra en el **panel de reconciliación**.
+#### 5.9 Integridad
+Cada operación de stock es una función transaccional que **solo escribe en `wms_*`**. La validación en pantalla es una ayuda; la base revalida.
 
-#### 5.8 Baja por avería
-Producto dañado → `BAJA`, sale del contenedor y se **propaga al POS** como `merma` (descuenta `stock_actual`).
+#### 5.10 Inventario general / conteo (CR3, IN1, IN2, IN3)
+- Se cuenta **todo** lo que hay en el contenedor; la pantalla muestra **esperado = ubicado + reservado** y resta lo reservado antes de registrar. Un conteo menor que lo reservado no se registra (IN1).
+- **Mayor:** primero se ubica lo de `SIN_UBICAR`; el **sobrante real queda pendiente** (conteo `ABIERTO`) hasta registrar un **ajuste + en el POS**.
+- **Cierre del sobrante (IN2):** *Ubicar* (exige que el ajuste + ya haya llegado; mueve las unidades al contenedor contado) o *Descartar* (error de conteo, sin mover stock).
+- **Menor:** lo que falta vuelve a `SIN_UBICAR`; no se toca el POS.
+- Lo esperado es visible, con botón "Coincide"; el campo "Contado" empieza vacío (IN3).
 
-#### 5.9 Integridad (lección POS Fase 29)
-Movimiento + efecto en `wms_stock_ubicacion` **atómicos** (función Postgres `.rpc()` transaccional); si falla un paso, se revierte todo. Nunca cantidad negativa. Reconciliación por SKU sumando 3 bodegas + `SIN_UBICAR`.
+#### 5.11 Buscar producto
+Sin stock visible (B1), sincroniza al abrir (B2), ubicaciones con formato V1 y aviso de diferencia con el POS.
+
+#### 5.12 Reconciliación (RC1)
+Solo lectura. Muestra cada diferencia como **POS − WMS** con su causa y dónde resolverla: salida pendiente (→ Bajas y ajustes), movimiento fallido (motivo), o sin movimiento que la explique (venta anulada D2 o cambio directo en el POS). También lista salidas por resolver, sobrantes de conteo y movimientos sin procesar. Igualar diferencias sin movimiento queda pendiente (RC2).
 
 ---
 
 ### 6. Flujos
-
-**6.1 Recibir (sin obligar a ubicar):** `Compra RECIBIDA → +SIN_UBICAR`
-**6.2 Ubicar:** `SIN_UBICAR → UBICADO (contenedor elegido)`
-**6.3 Vender/Despachar:** `Venta CONFIRMADA → RESERVA → DESPACHO`; `Venta ANULADA → LIBERACION`
-**6.4 Trasladar:** `TRASLADO ; UBICADO(origen) → UBICADO(destino)`
-**6.5 Ajustar/Baja:** `POS ajuste (+/−) → reconcilia`; `Avería → BAJA + merma en POS`
+- **Recibir:** compra en POS → `+SIN_UBICAR`. **Ubicar:** `SIN_UBICAR → UBICADO`.
+- **Vender/Despachar:** venta → `RESERVA` → `DESPACHO`. **Trasladar:** `UBICADO → UBICADO`.
+- **Avería / faltante:** merma o ajuste − en el POS → sincronización → (si está ubicado) origen en Bajas y ajustes.
+- **Sobrante:** conteo → pendiente → ajuste + en el POS → Ubicar en Inventario.
+- **Control:** Panel → Reconciliación → acción en el POS o en la pantalla indicada.
 
 ---
 
-### 7. UI/UX (páginas MVP, mobile-first, paleta Slate / modo oscuro)
-1. **Dashboard** — SKU sin ubicar, pendientes por despachar, diferencias.
-2. **Inventario general** — contar y **ubicar** (`SIN_UBICAR → UBICADO`).
-3. **Buscar producto** — ruta completa bodega › contenedor › cantidad.
-4. **Despachar** — ventas del POS; con o sin ubicación.
-5. **Traslados** — mover entre contenedores/bodegas.
-6. **Reconciliación** — resolver diferencias por ajustes del POS.
-7. **Baja por avería**.
-8. **Configuración** — alta de bodegas y contenedores (con sus códigos).
-9. **Reportes**.
+### 7. UI/UX
 
-> Estilo: monocromático **Slate** (Tailwind), **modo oscuro por defecto** (`class="dark"` + anti-flash), header fijo `pt-16`, sidebar como POS, PWA con service worker (versioning `wms-YYYYMMDD-NN`, bypass localhost).
+#### 7.1 Páginas
+| Página | Función | Fase |
+|---|---|---|
+| `login.html` | Login propio; abre Buscar (PN1) | A ✅ |
+| `buscar.html` · `ubicar.html` · `config.html` | Buscar · Ubicar · Configuración | A ✅ |
+| `despachar.html` · `traslados.html` · `panel.html` | Despacho · Traslados · Panel | B ✅ |
+| `ajustes.html` | Bajas y ajustes del POS | C ✅ |
+| `inventario.html` | Conteo y sobrantes | C ✅ |
+| `reconciliacion.html` | Diferencias y causas | C ✅ |
+
+#### 7.2 Navegación
+Celular: barra inferior **Buscar · Ubicar · Despachar · Más** ("Más": Traslados, Panel, Inventario, Reconciliación, Bajas y ajustes, Configuración, Cerrar sesión). Computador: sidebar. Todo el menú habilitado.
+
+#### 7.3 Estilo
+Slate, modo oscuro por defecto, cards, toast superior, ASCII plano, PWA (`kubit-wms-YYYYMMDD-NN`). Fechas en America/Bogota (Z1).
+
+#### 7.4 Formato de ubicación (V1)
+```
+30191                                11    <- código y cantidad, grandes
+Canastilla 01 › Suelto 91 · nombre         <- puesto y posición
+Bodega 3 · Cuarto Util Grande              <- bodega
+```
 
 ---
 
 ### 8. Integración Técnica
 | Aspecto | Definición |
 |---|---|
-| **DB** | Supabase (gratuito); tablas `wms_*`; FK lógicas a `pos_*`. |
-| **Stack** | HTML + Tailwind CDN + JS vanilla + `supabase-js`; transacciones vía funciones Postgres `.rpc()`. |
-| **Sync (MVP)** | Lectura bajo demanda; idempotencia por `ref_pos_*`; panel de reconciliación. |
-| **No-intrusión** | Solo lee `pos_*`; para ajustes/bajas inserta en `pos_movimientos_inventario`. |
-| **RLS** | Habilitado por `bodega_id` + grants explícitos. |
-| **Frontend** | **PWA**, **entrada manual** de códigos (sin lector). |
+| **DB** | Supabase (gratuito); tablas `wms_*`; FK hacia `pos_*` solo como referencia |
+| **Escritura** | Maestros directo (C1); stock solo por `rpc()`; **nunca** sobre `pos_*`/`st_*` (CR1) |
+| **Sync** | Lectura bajo demanda; idempotencia; candado propio; línea base |
+| **Verificación de scripts (I-1)** | Un script se da por ejecutado solo con su verificación: A (escrituras en `pos_*`/`st_*` = 0), B (bloqueos = 0), C (funciones esperadas: 21 tras `09`, 18 tras `10`, 19 tras `11`) y específicas. "Success" del editor no es verificación |
+| **Despliegue** | Pruebas: `KUBIT-Pruebas` → Vercel `kubit-wms-calidad`. Producción: `apps/wms/specs/despliegue-produccion.md` (v4) |
+| **Credenciales** | `apps/wms/js/config.js` nunca va a producción (no confundir con `js/paginas/config.js`) |
 
 ---
 
 ### 9. Roles (RBAC)
-Hoy **uso personal (un admin)**. Previstos: `wms_admin`, `wms_operario`, `wms_consulta` (reutiliza `pos_roles`/`pos_permisos`).
+Uso personal (un admin). Previstos: permisos `wms.*` en `pos_permisos` si otro rol usa el WMS.
 
 ---
 
 ### 10. Plan por Fases
-- **Fase 0:** montar SDD + estructura `apps/wms`.
-- **Fase 1 (MVP):** tablas núcleo; Inventario general; ubicar; buscar; despachar (con/sin ubicación); traslados; ajustes/reconciliación; baja.
-- **Fase 2:** automatización (triggers/Edge Functions), órdenes de trabajo.
-- **Fase 3:** mapa de bodegas, reportes de ocupación, escaneo por cámara (PWA).
+- **Base de datos:** ✅ `08`, `09` v2, `10`, `11`, inicialización (135 SKUs, 1.034 unidades).
+- **Fase A** ✅ 2026-10-01 · **Fase B** ✅ 2026-10-02 · **Fase C** ✅ 2026-10-06.
+- **Producción:** plan v4, sin fecha.
+- **Posterior:** anulaciones (D2), RC2/T-521, T-515, endurecimiento (pruebas automáticas, renovación de sesión, permisos), escaneo por cámara.
 
 ---
 
-### 11. Set de Pruebas (vitest + jsdom, patrón del repo)
-- Recibir → +`SIN_UBICAR`; `stock_actual` intacto.
-- Ubicar → `SIN_UBICAR → UBICADO`; un SKU en varios contenedores.
-- Recibido→vendido inmediato → `SIN_UBICAR → RESERVADO → DESPACHADO` sin ubicar.
-- Anular venta → liberación.
-- Traslado B1→B3 → total y POS intactos.
-- Ajuste + → entra a `SIN_UBICAR`; Ajuste − → sale de `SIN_UBICAR`/contenedor.
-- Baja → `BAJA` + `merma` en POS.
-- Reconciliación → `SUM(SIN_UBICAR+UBICADO) == stock_actual`.
-- Atomicidad → si falla el update, se revierte el movimiento.
-- Códigos → validar formato de 5 dígitos y rangos (sección 15).
+### 11. Set de Pruebas
+| Prueba | Estado |
+|---|---|
+| Recibir, reservar y despachar; idempotencia | ✅ 2026-09-29 |
+| Buscar, Configuración, Ubicar, formato V1 | ✅ 2026-10-01 |
+| Despachar (bandeja, detalle, venta anulada bloqueada) | ✅ 2026-10-01 |
+| Traslados (misma bodega y entre bodegas) · Panel | ✅ 2026-10-02 |
+| Solo lectura (CR1): A = 0, B = 0, C = 19, sin escrituras `referencia = 'WMS'` | ✅ 2026-10-06 |
+| Bajas y ajustes: automático sin ubicar; pendiente y resuelto si está ubicado (CR2) | ✅ 2026-10-06 |
+| Inventario: coincide, faltante, mayor desde sin ubicar, sobrante, Ubicar/Descartar, reservado (IN1) | ✅ 2026-10-06 |
+| Reconciliación: causas, enlaces, comparación con SQL | ✅ 2026-10-06 |
+| Anular venta → liberación | ⏸ Diferida (D2) |
 
 ---
 
 ### 12. Decisiones — estado
 | # | Decisión | Estado |
 |---|---|---|
-| 1 | Multi-bodega | ✅ 3 bodegas |
-| 2 | Sync MVP | ✅ Lectura bajo demanda |
-| 3 | Reserva | ✅ En la venta |
-| 4 | Detalle de ubicación | ✅ Árbol Estantería→Entrepaño→Caja y Canastilla→Bolsa/Suelto |
-| 5 | FIFO/FEFO | ✅ No aplica |
-| 6 | Calidad | ✅ Solo primera; avería → BAJA |
-| 7 | Ajustes | ✅ Sin aprobación |
-| 8 | Traslados | ✅ Entre bodegas y contenedores |
-| 9 | Carga inicial | ✅ No masiva; vía Inventario general |
-| 10 | SKU multi-ubicación | ✅ Permitido |
-| 11 | Despacho sin ubicar | ✅ Permitido (`SIN_UBICAR` lógico) |
-| 12 | Anulación libera reserva | ✅ Sí |
-| 13 | Devoluciones | ✅ Fuera del MVP (vía ajuste POS, ver 5.7) |
-| 14 | Unidad de medida | ✅ Unidades sueltas |
-| 15 | Bodega 1 personal | ✅ Se ignora lo personal |
-| 16 | Capacidad/bloqueos | ✅ No se gestionan |
-| 17 | Entrada de datos | ✅ Manual, mobile-first |
-| 18 | Nomenclatura | ✅ Numérica 5 dígitos `B CC PP` (sección 15) |
-| 19 | Stack / UI | ✅ HTML+Tailwind CDN+JS vanilla; paleta **Slate**, modo oscuro |
-| 20 | Numeración en specs/ | ✅ `07-wms-spec.md` (06 ocupado por servicio-correo) |
+| 1–28 | Multi-bodega, sync bajo demanda, reserva en la venta, detalle de ubicación, sin FIFO/FEFO, solo primera calidad, ajustes sin aprobación, traslados, carga inicial como `SIN_UBICAR`, SKU multi-ubicación, despacho sin ubicar, anulación diferida (D2), devoluciones fuera, unidades sueltas, bodega 1 personal ignorada, sin capacidad, entrada manual, nomenclatura `B CC PP`, stack, numeración de specs, D1, D3, D4, D5, D6, regla del conteo, login y navegación, despliegue en Vercel | ✅ (ver v10) |
+| 29–34 | P1, B1, B2, C1, U1, V1 | ✅ 2026-10-01 |
+| 35–42 | DB1, DB2, T1, PN1, Z1, T2/T3, PN2, DP1 | ✅ 2026-10-01 / 02 |
+| 43 | **CR1** Solo lectura de `pos_*` y `st_*` | ✅ 2026-10-02 (usuario) |
+| 44 | **CR2** Salidas del POS pendientes si el producto está ubicado | ✅ 2026-10-06 |
+| 45 | **CR3** Sobrante pendiente hasta ajuste + en el POS | ✅ 2026-10-06 |
+| 46 | **AJ1** Origen de la salida elegido de una lista | ✅ 2026-10-06 |
+| 47 | **IN1** Conteo resta lo reservado | ✅ 2026-10-06 |
+| 48 | **IN2** Cierre del sobrante: Ubicar / Descartar | ✅ 2026-10-06 |
+| 49 | **IN3** Conteo con esperado visible y "Coincide" | ✅ 2026-10-06 |
+| 50 | **RC1** Reconciliación de solo lectura; POS − WMS | ✅ 2026-10-06 |
+| 51 | **DP2** Verificación después de cada script; registro por ambiente | ✅ 2026-10-06 |
+| 52 | **RC2** Igualar el WMS al POS cuando no hay movimiento que explique la diferencia (solo `wms_*`, T-521) | ⏳ Pendiente de decisión |
+
+**Riesgos abiertos:** R-B1 (T-515); R-C1 doble paso por CR1; R-C2 sesgo del conteo; R-C3 diferencias sin movimiento (RC2).
 
 ---
 
 ### 13. Glosario
 | Término | Definición |
 |---|---|
-| **SIN_UBICAR** | Stock que existe pero aún no tiene contenedor (estado lógico) |
-| **UBICADO** | Stock asignado a un contenedor real |
-| **RESERVADO / DESPACHADO** | Vendido pendiente de salida / salido físicamente |
-| **BAJA** | Producto averiado retirado |
-| **SUELTO** | Producto dentro de una canastilla sin bolsa |
-| **Contenedor** | Estantería, entrepaño, caja, canastilla, bolsa o zona suelta |
-| **Reconciliación** | Igualar stock físico (WMS) con contable (POS) |
+| **Puesto** | Canastilla (piso) o entrepaño; `CC` 01–99 único en la bodega |
+| **Contenido** | Bolsa, caja o zona suelta dentro de un puesto |
+| **SIN_UBICAR / UBICADO** | Stock sin contenedor / en un contenedor |
+| **RESERVADO** | Vendido sin despachar; sigue físicamente en el contenedor |
+| **Salida pendiente** | Ajuste − o merma del POS de un producto ubicado, a la espera del origen |
+| **Sobrante pendiente** | Unidades contadas de más que esperan un ajuste + en el POS |
+| **Solo lectura (CR1)** | El WMS consulta `pos_*`/`st_*` pero nunca las modifica ni bloquea |
+| **Reconciliación** | Comparar el stock físico (WMS) con el contable (POS) y explicar la diferencia |
+
+---
+
+### 14. Incidentes
+- **I-1 (2026-10-06):** el `10` no se había ejecutado en pruebas (el C0 se aprobó sin la verificación A/B/C). Detectado al ejecutar el `11`. Impacto: ninguno sobre el POS (0 movimientos `referencia = 'WMS'`). Se ejecutó el `10` y se revalidaron C0, C1 y C2. Origen de la regla de verificación (§8) y de DP2.
 
 ---
 
 ### 15. Estándar de Nomenclatura de Códigos (OFICIAL)
 
-**Objetivo:** códigos **cortos, 100% numéricos** (cero cambios de teclado en el móvil), fáciles de escribir con marcador y de digitar en el celular.
-
-#### 15.1 Formato
 ```
 B CC PP   →  5 dígitos, todo numérico
-
-B   = bodega            1–9        (1=Hogar/Limpieza, 2=Mini Cuarto Útil, 3=Cuarto Útil Grande)
-CC  = contenedor        01–50 canastilla · 51–99 entrepaño de estantería
-PP  = posición:
-        en canastilla → 01–90 bolsa · 91–99 suelto (sub-zonas dentro de la canastilla)
-        en entrepaño  → 01–99 caja
-        00            → referencia al contenedor completo (traslado de toda la canastilla/entrepaño)
+B   = bodega 1–9
+CC  = puesto 01–99, único en la bodega: canastilla (piso) O entrepaño, nunca ambos
+PP  = 00 el puesto · 01–90 bolsa (canastilla) o caja (entrepaño), un producto · 91–99 zona suelta, varios
 ```
 
-#### 15.2 Ejemplos
 | Código | Significado |
 |---|---|
-| `20110` | Bodega 2 · Canastilla 01 · Bolsa 10 |
-| `30191` | Bodega 3 · Canastilla 01 · Suelto (zona 91) |
-| `35905` | Bodega 3 · Entrepaño 59 · Caja 05 |
-| `30100` | Bodega 3 · Canastilla 01 completa (referencia) |
+| `30100` | Canastilla 01 (Bodega 3) |
+| `30110` | Bolsa 10 de la canastilla 01 |
+| `30191` | Zona suelta de la canastilla 01 |
+| `30500` | Entrepaño 05 |
+| `30503` | Caja 03 del entrepaño 05 |
+| `30591` | Zona suelta del entrepaño 05 |
 
-> Ejemplo SKU **AL048**: en bolsa 10 de la canastilla 01 (bodega 3) → `30110`; suelto en esa canastilla → `30191`.
-
-#### 15.3 Por qué esta opción
-- **Un solo teclado (numérico):** digitación muy rápida en móvil.
-- **Longitud fija (5 dígitos):** validación trivial, menos errores.
-- **Único global:** la bodega va incrustada; `20110` no se repite en otra bodega.
-- **Autodescriptivo por rango:** el rango indica canastilla/entrepaño y bolsa/suelto sin letras.
-- **En el adhesivo escribes exactamente el número** con marcador.
-
-#### 15.4 Reglas técnicas (blindaje ante crecimiento)
-1. **`wms_ubicaciones.tipo` es la fuente de verdad** (CANASTILLA/ENTREPANO/BOLSA/CAJA/SUELTO). El rango numérico es **solo ayuda visual**: si un número se sale del rango por necesidad futura, **los datos no se corrompen**.
-2. **Un código de "suelto" (91–99) puede alojar varios SKU** a la vez: el WMS los distingue por `producto_detalle_id`. Con un solo código de suelto (ej. `91`) basta; los 92–99 son sub-zonas físicas **opcionales**.
-3. **Límite a vigilar:** máximo **50 canastillas por bodega** (rango 01–50) — único techo con probabilidad real de tocarse en la Bodega 3. Mitigación: en bodegas **solo de canastillas** (sin estantería) el rango se puede ampliar a 01–99, ya que `tipo` manda sobre el rango.
-4. La app **reconstruye la ruta completa** desde `parent_id`; el usuario solo digita el código de 5 dígitos.
-
-#### 15.5 Capacidad del esquema vs. inventario actual
-| Segmento | Máximo | Uso actual | Estado |
-|---|---|---|---|
-| Bodegas | 9 | 3 | ✅ Amplio |
-| Canastillas / bodega | 50 | < 50 | ⚠️ Vigilar en B3 |
-| Entrepaños / bodega | 49 (51–99) | 1 estantería | ✅ Amplio |
-| Bolsas / canastilla | 90 (01–90) | pocas | ✅ Amplio |
-| Sueltos / canastilla | 9 (91–99) | pocos | ✅ Suficiente |
-| Cajas / entrepaño | 99 | 30–40 total | ✅ Amplio |
+Reglas: `wms_ubicaciones.tipo` es la fuente de verdad; código único (`uk_wms_ubicaciones_codigo`); la zona suelta aloja varios SKU; mover una caja de entrepaño cambia su código; la pantalla arma la descripción desde el código (V1).

@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Kubit WMS — Ubicar</title>
+  <!--
+    PASO A8: Ubicar (HU-02).  SIN_UBICAR -> UBICADO via rpc wms_ubicar.
+    Paso 1: buscar el producto (muestra cuantas unidades estan sin ubicar).
+    Paso 2: digitar el contenedor (5 digitos), la cantidad y confirmar.
+    Recuerda el ultimo contenedor usado para ubicar varios productos seguidos.
+    V1: ubicaciones con js/compartido/ubicacion-vista.js.
+  -->
+  <script>
+    if (localStorage.getItem('darkMode') === 'false') {
+      document.documentElement.classList.remove('dark');
+    }
+  </script>
+  <script src="https://cdn.tailwindcss.com" charset="UTF-8"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: { fontFamily: { sans: ['Poppins', 'sans-serif'] } } }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/estilo.css">
+  <link rel="stylesheet" href="css/wms.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#020617">
+  <link rel="icon" href="img/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="img/icon-192x192.png">
+</head>
+<body data-pagina="ubicar" data-titulo="Ubicar"
+  class="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-950 dark:text-white font-sans">
+
+  <main id="contenido" class="invisible px-4 max-w-xl mx-auto lg:max-w-3xl">
+
+    <!-- ===================== PASO 1: elegir producto ===================== -->
+    <div id="paso-buscar">
+      <div class="sticky top-16 z-10 -mx-4 px-4 pt-1 pb-3 bg-slate-50/95 dark:bg-slate-950/95 backdrop-blur">
+        <label for="busqueda" class="sr-only">Buscar producto</label>
+        <div class="relative">
+          <svg class="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
+          </svg>
+          <input id="busqueda" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false"
+            class="w-full pl-11 pr-11 py-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 text-base text-slate-950 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-950 dark:focus:ring-white/20"
+            placeholder="Producto a ubicar: codigo o nombre">
+          <button id="btn-limpiar" type="button" aria-label="Limpiar busqueda"
+            class="hidden absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-lg text-slate-400 hover:text-slate-950 dark:hover:text-white">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+        <div class="mt-2 flex items-center justify-between gap-2 min-h-[1.25rem]">
+          <p id="estado-busqueda" class="text-xs text-slate-500 dark:text-slate-400"></p>
+          <p id="estado-sync" class="text-xs text-slate-500 dark:text-slate-400 text-right"></p>
+        </div>
+      </div>
+
+      <div id="resultados" class="space-y-3">
+        <div id="ayuda" class="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 p-6 text-center">
+          <p class="text-sm font-medium">Ubicar producto</p>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Busca el producto, luego digita el codigo del contenedor (bolsa, caja o zona suelta) y la cantidad.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== PASO 2: contenedor y cantidad ===================== -->
+    <div id="paso-ubicar" class="hidden space-y-4">
+      <button id="btn-volver" type="button" class="inline-flex items-center gap-1 text-sm text-slate-500 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5"/></svg>
+        Cambiar producto
+      </button>
+
+      <!-- Producto elegido -->
+      <section class="bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 rounded-xl p-4">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p id="sel-nombre" class="text-sm font-medium"></p>
+            <p id="sel-codigo" class="text-xs text-slate-500 dark:text-slate-400 mt-0.5 break-words"></p>
+          </div>
+          <div class="text-right shrink-0">
+            <p id="sel-sin-ubicar" class="text-2xl font-semibold leading-none">0</p>
+            <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-1">sin ubicar</p>
+          </div>
+        </div>
+        <div id="sel-ubicaciones"></div>
+      </section>
+
+      <!-- Formulario -->
+      <form id="form-ubicar" class="bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 rounded-xl p-4 space-y-4" autocomplete="off">
+        <div>
+          <label for="cont-codigo" class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Contenedor</label>
+          <input id="cont-codigo" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="5" placeholder="Ej. 30110"
+            class="w-full px-4 py-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200/60 dark:border-slate-800 text-2xl text-center font-mono font-semibold tracking-[0.3em] focus:outline-none focus:ring-2 focus:ring-slate-950 dark:focus:ring-white/20">
+          <div id="cont-info" class="mt-2 min-h-[2.5rem] text-xs text-slate-500 dark:text-slate-400"></div>
+        </div>
+
+        <div>
+          <label for="cantidad" class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Cantidad</label>
+          <div class="grid grid-cols-[3.25rem_1fr_3.25rem] gap-2">
+            <button id="btn-menos" type="button" aria-label="Restar uno" class="py-3 rounded-xl text-xl font-semibold border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">−</button>
+            <input id="cantidad" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="5"
+              class="w-full px-3 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200/60 dark:border-slate-800 text-xl text-center font-semibold focus:outline-none focus:ring-2 focus:ring-slate-950 dark:focus:ring-white/20">
+            <button id="btn-mas" type="button" aria-label="Sumar uno" class="py-3 rounded-xl text-xl font-semibold border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">+</button>
+          </div>
+          <div class="mt-2 flex items-center justify-between gap-2">
+            <p id="cant-info" class="text-xs text-slate-500 dark:text-slate-400"></p>
+            <button id="btn-todo" type="button" class="text-xs font-medium underline underline-offset-2 text-slate-600 dark:text-slate-300">Todo</button>
+          </div>
+        </div>
+
+        <button id="btn-ubicar" type="submit" disabled
+          class="w-full py-3.5 rounded-xl bg-slate-950 dark:bg-white text-white dark:text-slate-950 font-medium text-sm hover:bg-slate-800 dark:hover:bg-slate-100 transition-all active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none">
+          Ubicar
+        </button>
+      </form>
+    </div>
+  </main>
+
+  <script src="js/config.js" charset="UTF-8"></script>
+  <script src="js/supabase.js" charset="UTF-8"></script>
+  <script src="js/compartido/database.js" charset="UTF-8"></script>
+  <script src="js/compartido/auth.js" charset="UTF-8"></script>
+  <script src="js/compartido/layout.js" charset="UTF-8"></script>
+  <script src="js/compartido/ubicacion-vista.js" charset="UTF-8"></script>
+  <script src="js/paginas/ubicar.js" charset="UTF-8"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('service-worker.js');
+      navigator.serviceWorker.addEventListener('message', function (ev) {
+        if (ev.data && ev.data.accion === 'recargar') location.reload();
+      });
+    }
+  </script>
+</body>
+</html>

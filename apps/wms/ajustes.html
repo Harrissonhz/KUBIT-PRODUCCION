@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Kubit WMS — Bajas y ajustes</title>
+  <!--
+    PASO C1: Bajas y ajustes del POS (HU-08, reglas CR1 y CR2).
+    - Las mermas y los ajustes - se registran en el POS (el WMS no escribe en el POS).
+    - Si el producto esta ubicado, la salida queda pendiente: aqui se indica
+      de donde salio (sin ubicar o un contenedor) con wms_resolver_decremento.
+  -->
+  <script>
+    if (localStorage.getItem('darkMode') === 'false') {
+      document.documentElement.classList.remove('dark');
+    }
+  </script>
+  <script src="https://cdn.tailwindcss.com" charset="UTF-8"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: { fontFamily: { sans: ['Poppins', 'sans-serif'] } } }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/estilo.css">
+  <link rel="stylesheet" href="css/wms.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#020617">
+  <link rel="icon" href="img/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="img/icon-192x192.png">
+</head>
+<body data-pagina="ajustes" data-titulo="Bajas y ajustes"
+  class="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-950 dark:text-white font-sans">
+
+  <main id="contenido" class="invisible px-4 max-w-xl mx-auto lg:max-w-3xl">
+
+    <div class="sticky top-16 z-10 -mx-4 px-4 pt-1 pb-3 bg-slate-50/95 dark:bg-slate-950/95 backdrop-blur">
+      <div class="flex items-center justify-between gap-3">
+        <div class="min-w-0">
+          <p id="resumen" class="text-sm font-medium">Cargando...</p>
+          <p id="estado-sync" class="text-xs text-slate-500 dark:text-slate-400"></p>
+        </div>
+        <button id="btn-actualizar" type="button"
+          class="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"/>
+          </svg>
+          Actualizar
+        </button>
+      </div>
+    </div>
+
+    <!-- Como funciona -->
+    <details class="mb-3 rounded-xl border border-slate-200/60 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 text-xs text-slate-600 dark:text-slate-300">
+      <summary class="cursor-pointer select-none font-medium text-slate-700 dark:text-slate-200">Como registrar una averia o un faltante</summary>
+      <ol class="mt-2 ml-4 list-decimal space-y-1">
+        <li>Registralo en el <strong>POS</strong>: averia como <strong>merma</strong>, faltante como <strong>ajuste −</strong>. El WMS no modifica el POS.</li>
+        <li>Si el producto no esta ubicado en ningun contenedor, el WMS lo descuenta solo al sincronizar.</li>
+        <li>Si esta ubicado, aparece aqui: indica de donde salio y toca <strong>Descontar</strong>.</li>
+      </ol>
+    </details>
+
+    <div id="aviso" class="hidden mb-3 rounded-xl border border-amber-300 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/30 p-3 text-sm text-amber-800 dark:text-amber-300"></div>
+
+    <div id="lista" class="space-y-3"></div>
+  </main>
+
+  <script src="js/config.js" charset="UTF-8"></script>
+  <script src="js/supabase.js" charset="UTF-8"></script>
+  <script src="js/compartido/database.js" charset="UTF-8"></script>
+  <script src="js/compartido/auth.js" charset="UTF-8"></script>
+  <script src="js/compartido/layout.js" charset="UTF-8"></script>
+  <script src="js/compartido/fecha.js" charset="UTF-8"></script>
+  <script src="js/compartido/ubicacion-vista.js" charset="UTF-8"></script>
+  <script src="js/paginas/ajustes.js" charset="UTF-8"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('service-worker.js');
+      navigator.serviceWorker.addEventListener('message', function (ev) {
+        if (ev.data && ev.data.accion === 'recargar') location.reload();
+      });
+    }
+  </script>
+</body>
+</html>

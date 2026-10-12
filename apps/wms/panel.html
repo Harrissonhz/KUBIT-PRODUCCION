@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Kubit WMS — Panel</title>
+  <!--
+    PASO B6: Panel (HU-11).
+    - Al abrir (y con "Actualizar") sincroniza con el POS.
+    - Indicadores: sin ubicar, ventas por despachar, diferencias con el POS
+      y movimientos del POS pendientes. Cada uno lleva a su pantalla.
+    - Solo lectura. El login sigue abriendo Buscar (PN1).
+  -->
+  <script>
+    if (localStorage.getItem('darkMode') === 'false') {
+      document.documentElement.classList.remove('dark');
+    }
+  </script>
+  <script src="https://cdn.tailwindcss.com" charset="UTF-8"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: { fontFamily: { sans: ['Poppins', 'sans-serif'] } } }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/estilo.css">
+  <link rel="stylesheet" href="css/wms.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#020617">
+  <link rel="icon" href="img/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="img/icon-192x192.png">
+</head>
+<body data-pagina="panel" data-titulo="Panel"
+  class="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-950 dark:text-white font-sans">
+
+  <main id="contenido" class="invisible px-4 max-w-xl mx-auto lg:max-w-3xl">
+
+    <!-- Estado y actualizar -->
+    <div class="sticky top-16 z-10 -mx-4 px-4 pt-1 pb-3 bg-slate-50/95 dark:bg-slate-950/95 backdrop-blur">
+      <div class="flex items-center justify-between gap-3">
+        <div class="min-w-0">
+          <p class="text-sm font-medium">Resumen del almacen</p>
+          <p id="estado-sync" class="text-xs text-slate-500 dark:text-slate-400">Cargando...</p>
+        </div>
+        <button id="btn-actualizar" type="button"
+          class="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"/>
+          </svg>
+          Actualizar
+        </button>
+      </div>
+    </div>
+
+    <!-- Indicadores -->
+    <div class="grid gap-3 sm:grid-cols-2">
+      <section id="card-sin-ubicar" class="rounded-xl border border-slate-200/60 dark:border-slate-800 bg-white dark:bg-slate-900 p-4"></section>
+      <section id="card-despacho" class="rounded-xl border border-slate-200/60 dark:border-slate-800 bg-white dark:bg-slate-900 p-4"></section>
+      <section id="card-diferencias" class="rounded-xl border border-slate-200/60 dark:border-slate-800 bg-white dark:bg-slate-900 p-4"></section>
+      <section id="card-pendientes" class="rounded-xl border border-slate-200/60 dark:border-slate-800 bg-white dark:bg-slate-900 p-4"></section>
+    </div>
+  </main>
+
+  <script src="js/config.js" charset="UTF-8"></script>
+  <script src="js/supabase.js" charset="UTF-8"></script>
+  <script src="js/compartido/database.js" charset="UTF-8"></script>
+  <script src="js/compartido/auth.js" charset="UTF-8"></script>
+  <script src="js/compartido/layout.js" charset="UTF-8"></script>
+  <script src="js/compartido/fecha.js" charset="UTF-8"></script>
+  <script src="js/paginas/panel.js" charset="UTF-8"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('service-worker.js');
+      navigator.serviceWorker.addEventListener('message', function (ev) {
+        if (ev.data && ev.data.accion === 'recargar') location.reload();
+      });
+    }
+  </script>
+</body>
+</html>

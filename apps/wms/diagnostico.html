@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Kubit WMS — Diagnostico</title>
+  <!--
+    Pagina de diagnostico de la base tecnica. No requiere sesion y no se
+    cachea en el service worker.
+    Version 2 (plan de produccion v5, script 12):
+      3. Conexion: lee pos_configuracion_empresa (lectura publica del POS),
+         porque desde el 12 el WMS ya no es legible sin sesion.
+      4. Permisos del WMS (R-P3): intenta leer wms_bodegas SIN sesion.
+         OK = no se puede (12 aplicado). ATENCION = se puede (falta el 12).
+    Solo lectura: no escribe nada.
+  -->
+  <script>
+    if (localStorage.getItem('darkMode') === 'false') {
+      document.documentElement.classList.remove('dark');
+    }
+  </script>
+  <link rel="icon" href="img/icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: { fontFamily: { sans: ['Poppins', 'sans-serif'] } } }
+    };
+  </script>
+  <link rel="stylesheet" href="css/estilo.css">
+</head>
+<body class="bg-slate-50 dark:bg-slate-950 text-slate-950 dark:text-white font-sans min-h-screen">
+  <main class="max-w-xl mx-auto p-4 sm:p-6 space-y-4">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 bg-slate-950 dark:bg-white rounded-lg flex items-center justify-center shrink-0">
+        <span class="text-white dark:text-slate-950 font-bold text-sm">K</span>
+      </div>
+      <div>
+        <h1 class="text-lg font-semibold">Kubit WMS</h1>
+        <p class="text-xs text-slate-500 dark:text-slate-400">Diagnostico de la base tecnica</p>
+      </div>
+    </div>
+
+    <div id="alerta-ambiente" class="hidden rounded-xl border p-4 text-sm font-medium"></div>
+
+    <section class="bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 rounded-xl divide-y divide-slate-200/60 dark:divide-slate-800">
+      <div class="p-4 flex items-start justify-between gap-3">
+        <div>
+          <p class="text-sm font-medium">1. config.js</p>
+          <p id="det-config" class="text-xs text-slate-500 dark:text-slate-400">Verificando...</p>
+        </div>
+        <span id="est-config" class="text-xs font-semibold text-slate-400">...</span>
+      </div>
+      <div class="p-4 flex items-start justify-between gap-3">
+        <div>
+          <p class="text-sm font-medium">2. supabase.js</p>
+          <p id="det-supabase" class="text-xs text-slate-500 dark:text-slate-400">Verificando...</p>
+        </div>
+        <span id="est-supabase" class="text-xs font-semibold text-slate-400">...</span>
+      </div>
+      <div class="p-4 flex items-start justify-between gap-3">
+        <div>
+          <p class="text-sm font-medium">3. Conexion a la base de datos</p>
+          <p id="det-conexion" class="text-xs text-slate-500 dark:text-slate-400">Verificando...</p>
+        </div>
+        <span id="est-conexion" class="text-xs font-semibold text-slate-400">...</span>
+      </div>
+      <div class="p-4 flex items-start justify-between gap-3">
+        <div>
+          <p class="text-sm font-medium">4. Permisos del WMS sin sesion</p>
+          <p id="det-permisos" class="text-xs text-slate-500 dark:text-slate-400">Verificando...</p>
+        </div>
+        <span id="est-permisos" class="text-xs font-semibold text-slate-400">...</span>
+      </div>
+    </section>
+
+    <a href="login.html"
+      class="block w-full text-center px-4 py-2.5 rounded-xl text-sm font-medium border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all">
+      Ir al login
+    </a>
+  </main>
+
+  <script src="js/config.js"></script>
+  <script src="js/supabase.js"></script>
+  <script>
+    (function () {
+      var REF_PRUEBAS = 'gbjtdjbopwgbknklwldq';
+      var REF_PRODUCCION = 'gxqcybboiskwznxdioun';
+
+      function marcar(id, estado, texto) {
+        var est = document.getElementById('est-' + id);
+        var det = document.getElementById('det-' + id);
+        var etiqueta = { ok: 'OK', error: 'ERROR', atencion: 'ATENCION' }[estado];
+        var color = { ok: 'text-emerald-500', error: 'text-red-500', atencion: 'text-amber-500' }[estado];
+        est.textContent = etiqueta;
+        est.className = 'text-xs font-semibold ' + color;
+        det.textContent = texto;
+      }
+
+      // 1. config.js
+      var url = (typeof SUPABASE_URL !== 'undefined') ? SUPABASE_URL : '';
+      if (!url) {
+        marcar('config', 'error', 'No se encontro SUPABASE_URL. Revise js/config.js');
+      } else {
+        marcar('config', 'ok', 'Proyecto: ' + url.replace('https://', ''));
+        var alerta = document.getElementById('alerta-ambiente');
+        if (url.indexOf(REF_PRODUCCION) !== -1) {
+          alerta.textContent = 'ATENCION: esta configuracion apunta a PRODUCCION';
+          alerta.className = 'rounded-xl border p-4 text-sm font-medium border-red-300 text-red-600 dark:border-red-800 dark:text-red-400';
+        } else if (url.indexOf(REF_PRUEBAS) !== -1) {
+          alerta.textContent = 'Ambiente: PRUEBAS';
+          alerta.className = 'rounded-xl border p-4 text-sm font-medium border-emerald-300 text-emerald-600 dark:border-emerald-800 dark:text-emerald-400';
+        }
+      }
+
+      // 2. supabase.js
+      var api = window.__supabase;
+      var okApi = !!(api && typeof api.get === 'function' && typeof api.rpc === 'function');
+      marcar('supabase', okApi ? 'ok' : 'error', okApi ? 'Cliente cargado (get, rpc)' : 'window.__supabase no disponible');
+      if (!okApi) {
+        marcar('conexion', 'error', 'Sin cliente de datos');
+        marcar('permisos', 'error', 'Sin cliente de datos');
+        return;
+      }
+
+      // 3. Conexion: pos_configuracion_empresa es de lectura publica (la usa el login)
+      api.get('pos_configuracion_empresa?select=created_at&limit=1')
+        .then(function () { marcar('conexion', 'ok', 'La base de datos responde'); })
+        .catch(function (e) { marcar('conexion', 'error', e.message); });
+
+      // 4. Permisos (R-P3): sin sesion NO debe poder leerse el WMS
+      api.get('wms_bodegas?select=codigo&limit=1')
+        .then(function (rows) {
+          if (rows && rows.length) {
+            marcar('permisos', 'atencion', 'El WMS se puede leer sin sesion: falta ejecutar specs/12-wms-permisos.sql');
+          } else {
+            marcar('permisos', 'ok', 'El WMS no se puede leer sin sesion');
+          }
+        })
+        .catch(function () {
+          marcar('permisos', 'ok', 'El WMS no se puede leer sin sesion (acceso denegado)');
+        });
+    })();
+  </script>
+</body>
+</html>
