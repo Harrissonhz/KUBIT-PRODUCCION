@@ -31,6 +31,7 @@
     await Promise.all([cargarCategorias(), cargarProductos()]);
     bindearEventos();
     agregarFilaMultimedia(); // una fila vacia por defecto
+    actualizarAyudaStock();
   }
 
   /* ───────────────────────────────────────────────
@@ -281,6 +282,8 @@
 
       var expanded = v._expandido;
       var chevronClass = expanded ? 'rotate-180' : '';
+      // Fase 31: el stock de una variante ya guardada solo se cambia desde Inventario
+      var stockSoloLectura = !!v.id;
 
       return '<tr class="variant-row border-b border-slate-100 dark:border-slate-800/50 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">' +
         '<td class="py-1.5 px-2 text-xs text-slate-400 text-center">' + (i + 1) + '</td>' +
@@ -288,7 +291,7 @@
         '<td class="py-1.5 px-1"><input type="text" class="v-codigo w-full min-w-[60px] px-2 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-950 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-slate-950 dark:focus:ring-white/20 transition-all" value="' + (v.codigo_interno || '') + '" placeholder="SKU"></td>' +
         '<td class="py-1.5 px-1"><input type="number" class="v-precio-venta w-full min-w-[70px] px-2 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-950 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-slate-950 dark:focus:ring-white/20 transition-all" step="0.01" min="0" value="' + v.precio_venta + '"></td>' +
         '<td class="py-1.5 px-1"><input type="number" class="v-precio-compra w-full min-w-[70px] px-2 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-950 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-slate-950 dark:focus:ring-white/20 transition-all" step="0.01" min="0" value="' + v.precio_compra + '"></td>' +
-        '<td class="py-1.5 px-1"><input type="number" class="v-stock w-full min-w-[50px] px-2 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-950 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-slate-950 dark:focus:ring-white/20 transition-all" step="1" min="0" value="' + v.stock_actual + '"></td>' +
+        '<td class="py-1.5 px-1"><input type="number" class="v-stock w-full min-w-[50px] px-2 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-950 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-slate-950 dark:focus:ring-white/20 transition-all' + (stockSoloLectura ? ' opacity-60 cursor-not-allowed' : '') + '" step="1" min="0" value="' + v.stock_actual + '"' + (stockSoloLectura ? ' readonly tabindex="-1" title="Para cambiar el stock usa Inventario"' : '') + '></td>' +
         '<td class="py-1.5 px-1 text-center">' +
           '<button type="button" class="btn-expand-variante w-6 h-6 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" data-idx="' + i + '">' +
             '<svg class="w-3.5 h-3.5 transition-transform duration-200 ' + chevronClass + '" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/></svg>' +
@@ -450,6 +453,24 @@
   /* ───────────────────────────────────────────────
      FORMULARIO
      ─────────────────────────────────────────────── */
+  /* Fase 31: el stock solo se cambia desde Inventario (queda un movimiento).
+     Al editar, el campo es de solo lectura; al crear, es el stock inicial. */
+  function actualizarAyudaStock() {
+    var editando = !!EDITANDO_ID;
+    var inp = $('campo-stock');
+    if (inp) {
+      inp.readOnly = editando;
+      inp.classList.toggle('opacity-60', editando);
+      inp.classList.toggle('cursor-not-allowed', editando);
+    }
+    var ayuda = $('stock-ayuda');
+    if (ayuda) {
+      ayuda.innerHTML = editando
+        ? 'El stock es de solo lectura. Para cambiarlo usa <a href="inventario.html" class="underline">Inventario - Ajuste manual</a>: asi queda registrado el movimiento.'
+        : 'Al crear el producto, el stock que escribas se registra como movimiento "Stock inicial".';
+    }
+  }
+
   function limpiarFormulario() {
     EDITANDO_ID = null;
     EDITANDO_PRODUCTO_ID = null;
@@ -477,6 +498,7 @@
     MULTIMEDIA_ELIMINADOS = [];
     $('multimedia-container').innerHTML = '';
     agregarFilaMultimedia();
+    actualizarAyudaStock();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -485,6 +507,7 @@
     if (!p) return;
     EDITANDO_ID = detalleId;
     EDITANDO_PRODUCTO_ID = p.productoId;
+    actualizarAyudaStock();
     $('form-titulo').textContent = 'Editar Producto';
     $('form-producto-id').textContent = p.nombre;
     $('campo-nombre').value = p.nombre;
@@ -648,6 +671,7 @@
         var variantRows = $('variantes-tbody').querySelectorAll('.variant-row');
         if (!variantRows.length) { mostrarToast('Agrega al menos una variante'); _guardando = false; $('btn-guardar').disabled = false; $('btn-guardar').textContent = 'Guardar Producto'; return; }
         var savedIds = [];
+        var advertenciasStock = [];
 
         for (var vi = 0; vi < variantRows.length; vi++) {
           var row = variantRows[vi];
@@ -664,11 +688,12 @@
           var vPrecioCompra = parseFloat(row.querySelector('.v-precio-compra').value) || 0;
 
           var sec = row.nextElementSibling;
+          // Fase 31: el stock no se envia al actualizar; en una variante nueva es el stock inicial
+          var vStockInicial = parseInt(row.querySelector('.v-stock').value) || 0;
           var detalleData = {
             codigo_interno: row.querySelector('.v-codigo').value.trim() || null,
             precio_venta: vPrecioVenta,
             precio_compra: vPrecioCompra,
-            stock_actual: parseInt(row.querySelector('.v-stock').value) || 0,
             atributos: atributos,
             updated_by: userId
           };
@@ -694,9 +719,14 @@
           } else {
             detalleData.producto_id = productoId;
             detalleData.created_by = userId;
+            detalleData.stock_actual = 0; // Fase 31: el stock inicial se registra con su movimiento
             var rc = await DB.productos.detalleCrear(detalleData);
             if (rc.error) { mostrarToast('Error al crear variante: ' + rc.error); _guardando = false; $('btn-guardar').disabled = false; $('btn-guardar').textContent = 'Guardar Producto'; return; }
             savedIds.push(rc.data[0].id);
+            if (vStockInicial > 0) {
+              var rs = await DB.productos.ajustarStock(rc.data[0].id, vStockInicial, 'ajuste_incremento', 'Stock inicial', { usuarioId: userId });
+              if (rs.error) advertenciasStock.push((detalleData.codigo_interno || 'variante nueva') + ': ' + rs.error);
+            }
           }
         }
 
@@ -705,11 +735,16 @@
         }
 
         EDITANDO_PRODUCTO_ID = productoId;
-        mostrarToast('Producto guardado con variantes');
+        if (advertenciasStock.length) {
+          mostrarToast('Producto guardado, pero no se pudo registrar el stock inicial de: ' + advertenciasStock.join(' | ') + '. Cargalo desde Inventario.', 'error');
+        } else {
+          mostrarToast('Producto guardado con variantes');
+        }
       } else {
         var precioVenta = parseFloat($('campo-precio-venta').value) || 0;
         if (precioVenta <= 0) { mostrarToast('El precio de venta debe ser mayor a 0'); _guardando = false; $('btn-guardar').disabled = false; $('btn-guardar').textContent = 'Guardar Producto'; return; }
 
+        var stockInicial = parseInt($('campo-stock').value) || 0; // Fase 31: solo se usa al crear
         var detalleData = {
           codigo_interno: $('campo-codigo-interno').value.trim() || null,
           codigo_barras: $('campo-codigo-barras').value.trim() || null,
@@ -718,7 +753,6 @@
           precio_original: parseFloat($('campo-precio-original').value) || null,
           precio_mayorista: parseFloat($('campo-precio-mayorista').value) || null,
           descuento_max: parseInt($('campo-descuento-max').value) || 0,
-          stock_actual: parseInt($('campo-stock').value) || 0,
           stock_min: parseInt($('campo-stock-min').value) || 0,
           stock_max: parseInt($('campo-stock-max').value) || 0,
           peso: parseFloat($('campo-peso').value) || null,
@@ -738,11 +772,21 @@
         } else {
           detalleData.producto_id = productoId;
           detalleData.created_by = userId;
+          detalleData.stock_actual = 0; // Fase 31: el stock inicial se registra con su movimiento
           var r2 = await DB.productos.detalleCrear(detalleData);
           if (r2.error) { mostrarToast('Error al crear detalle: ' + r2.error); _guardando = false; $('btn-guardar').disabled = false; $('btn-guardar').textContent = 'Guardar Producto'; return; }
           EDITANDO_ID = r2.data[0].id;
           EDITANDO_PRODUCTO_ID = productoId;
-          mostrarToast('Producto creado');
+          if (stockInicial > 0) {
+            var rs2 = await DB.productos.ajustarStock(EDITANDO_ID, stockInicial, 'ajuste_incremento', 'Stock inicial', { usuarioId: userId });
+            if (rs2.error) {
+              mostrarToast('Producto creado, pero no se pudo registrar el stock inicial: ' + rs2.error + '. Cargalo desde Inventario.', 'error');
+            } else {
+              mostrarToast('Producto creado con stock inicial de ' + stockInicial);
+            }
+          } else {
+            mostrarToast('Producto creado');
+          }
         }
       }
 

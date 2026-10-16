@@ -1278,3 +1278,55 @@ describe('DB.ventas.anularConRevertir (Fase 30)', function () {
   });
 
 });
+
+// ═══════════════════════════════════════════════════════════════
+// Fase 31 — El stock solo cambia con movimiento
+// ═══════════════════════════════════════════════════════════════
+describe('DB.productos.detalleActualizar — no escribe stock (Fase 31)', function () {
+
+  it('descarta stock_actual y conserva los demas campos', async function () {
+    window.__supabase.patch.mockResolvedValue([{ id: 'pd-1' }]);
+
+    var res = await DB.productos.detalleActualizar('pd-1', { precio_venta: 25000, stock_actual: 99, stock_min: 3 });
+
+    expect(res.error).toBeNull();
+    var llamada = window.__supabase.patch.mock.calls[0];
+    expect(llamada[0]).toBe('pos_productos_detalle?id=eq.pd-1');
+    expect(llamada[1]).toEqual({ precio_venta: 25000, stock_min: 3 });
+    expect('stock_actual' in llamada[1]).toBe(false);
+  });
+
+  it('no modifica el objeto que recibe', async function () {
+    window.__supabase.patch.mockResolvedValue([{ id: 'pd-1' }]);
+    var datos = { precio_venta: 1000, stock_actual: 5 };
+
+    await DB.productos.detalleActualizar('pd-1', datos);
+
+    expect(datos.stock_actual).toBe(5);
+  });
+
+});
+
+describe('DB.productos.ajustarStock — stock inicial (Fase 31)', function () {
+
+  it('registra ajuste_incremento con motivo "Stock inicial" y sube el stock de 0 a N', async function () {
+    window.__supabase.get.mockResolvedValueOnce([{ id: 'pd-9', stock_actual: 0 }]);
+    window.__supabase.post.mockResolvedValue([{ id: 'mov-1' }]);
+    window.__supabase.patch.mockResolvedValue([{ id: 'ok' }]);
+
+    var res = await DB.productos.ajustarStock('pd-9', 8, 'ajuste_incremento', 'Stock inicial', { usuarioId: 'usr-1' });
+
+    expect(res.error).toBeNull();
+    expect(res.data.stock_anterior).toBe(0);
+    expect(res.data.stock_nuevo).toBe(8);
+    var mov = window.__supabase.post.mock.calls[0][1];
+    expect(mov.tipo_movimiento).toBe('ajuste_incremento');
+    expect(mov.cantidad).toBe(8);
+    expect(mov.motivo).toBe('Stock inicial');
+    expect(mov.created_by).toBe('usr-1');
+    var patchStock = window.__supabase.patch.mock.calls[0];
+    expect(patchStock[0]).toBe('pos_productos_detalle?id=eq.pd-9');
+    expect(patchStock[1].stock_actual).toBe(8);
+  });
+
+});

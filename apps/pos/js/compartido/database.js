@@ -232,7 +232,13 @@ window.DB = (function () {
     },
 
     detalleCrear: async function (data) { _cacheClear('productos'); return insert('pos_productos_detalle', data); },
-    detalleActualizar: async function (id, data) { _cacheClear('productos'); return update('pos_productos_detalle', id, data); },
+    detalleActualizar: async function (id, data) {
+      // Fase 31: el stock solo cambia con ajustarStock (deja un movimiento). Se ignora stock_actual.
+      _cacheClear('productos');
+      var datos = Object.assign({}, data);
+      delete datos.stock_actual;
+      return update('pos_productos_detalle', id, datos);
+    },
     detalleEliminar: async function (id) { _cacheClear('productos'); return softDelete('pos_productos_detalle', id); },
     detalleObtener: async function (id) {
       var res = await select('pos_productos_detalle', {
