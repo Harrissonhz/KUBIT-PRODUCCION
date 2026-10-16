@@ -95,7 +95,8 @@
         dimensiones: d.dimensiones || '',
         activo: p.activo !== false,
         tags: p.tags || [],
-        tasaImpuesto: p.tasa_impuesto || 0.19
+        // Fase 32: el 0 es un valor valido (exento); solo un dato vacio se toma como 0%
+        tasaImpuesto: (p.tasa_impuesto !== null && p.tasa_impuesto !== undefined) ? (parseFloat(p.tasa_impuesto) || 0) : 0
       };
     });
     productosFiltrarYRender();
@@ -646,7 +647,8 @@
         marca: $('campo-marca').value.trim() || null,
         modelo: $('campo-modelo').value.trim() || null,
         descripcion: $('campo-descripcion').value.trim() || null,
-        tasa_impuesto: parseFloat($('campo-impuesto').value) / 100 || 0.19,
+        // Fase 32: respeta el 0% (exento); un valor invalido se guarda como 0%, nunca como 19%
+        tasa_impuesto: (parseFloat($('campo-impuesto').value) || 0) / 100,
         activo: $('campo-activo').checked,
         tags: Array.from(document.querySelectorAll('.tag-chip.active')).map(function (el) { return el.dataset.tag; }),
         updated_by: userId
