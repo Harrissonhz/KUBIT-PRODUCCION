@@ -252,14 +252,27 @@
   /* ─── ANULAR ─── */
   async function anularVenta() {
     if (!VENTA_ACTUAL) return;
-    if (!confirm('¿Anular la venta ' + VENTA_ACTUAL.numero_venta + '?\nEsta accion no se puede deshacer.')) return;
+    if (!confirm('¿Anular la venta ' + VENTA_ACTUAL.numero_venta + '?\nSe devolvera el stock de sus productos y se revertiran las finanzas del mes.\nEsta accion no se puede deshacer.')) return;
 
-    var res = await DB.ventas.anular(VENTA_ACTUAL.id);
+    // Fase 30: anular con politica estricta (devuelve stock con movimiento y revierte finanzas)
+    var btn = $('btn-anular-venta');
+    var textoOriginal = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Anulando...';
+    var user = window.KubitAuth.obtenerUsuario();
+    var res = await DB.ventas.anularConRevertir(VENTA_ACTUAL.id, { usuarioId: user ? user.id : null });
+    btn.textContent = textoOriginal;
     if (res.error) {
-      mostrarToast('Error al anular: ' + res.error);
+      btn.disabled = false;
+      mostrarToast('Error al anular: ' + res.error, 'error');
       return;
     }
-    mostrarToast('Venta anulada correctamente');
+    var adv = (res.data && res.data.advertencias) || [];
+    if (adv.length) {
+      mostrarToast('Venta anulada con advertencias: ' + adv.join(' | '), 'info');
+    } else {
+      mostrarToast('Venta anulada. Stock devuelto correctamente', 'success');
+    }
     cerrarDetalle();
     await cargarVentas();
   }

@@ -722,7 +722,10 @@
         var anularRes = await DB.ventas.anularConRevertir(VENTA_EDITANDO_ID, { usuarioId: user.id });
         if (anularRes.error) {
           console.error('[Ventas] Error al anular venta original:', anularRes.error);
-          mostrarToast('Venta creada, pero error al anular la original: ' + anularRes.error);
+          mostrarToast('Venta nueva creada, pero la original NO se anulo: ' + anularRes.error + ' Anulela desde Historial.', 'error');
+        } else if (anularRes.data && anularRes.data.advertencias && anularRes.data.advertencias.length) {
+          // Fase 30: la original se anulo, pero algo menor fallo (ej. finanzas)
+          mostrarToast('Venta editada con advertencias: ' + anularRes.data.advertencias.join(' | '), 'info');
         }
         VENTA_EDITANDO_ID = null;
       }

@@ -257,28 +257,46 @@ window.DB = (function () {
     },
 
     ajustarStock: async function (detalleId, cantidad, tipoMovimiento, motivo, opts) {
+      // Politica estricta (Fase 30): primero el movimiento, luego el stock.
+      // Si falla el stock, se elimina el movimiento para no dejar registros huerfanos.
       var res = await productos.detalleObtener(detalleId);
       if (res.error || !res.data) return { data: null, error: res.error || 'Producto no encontrado' };
       var detalle = res.data;
 
-      var nuevoStock = detalle.stock_actual + cantidad;
+      var stockAnterior = parseInt(detalle.stock_actual || 0, 10);
+      var nuevoStock = stockAnterior + cantidad;
       if (nuevoStock < 0) return { data: null, error: 'Stock no puede ser negativo' };
 
-      var upd = await update('pos_productos_detalle', detalleId, { stock_actual: nuevoStock });
-      if (upd.error) return upd;
-
       var user = opts && opts.usuarioId || null;
-      var movRes = await insert('pos_movimientos_inventario', {
+      var mov = {
         producto_detalle_id: detalleId,
         tipo_movimiento: tipoMovimiento,
         cantidad: Math.abs(cantidad),
         motivo: motivo || 'Ajuste manual',
         created_by: user
-      });
+      };
+      if (opts && opts.referencia) mov.referencia = opts.referencia;
+      var movRes = await insert('pos_movimientos_inventario', mov);
+      if (movRes.error) {
+        return { data: null, error: 'No se pudo registrar el movimiento de inventario: ' + movRes.error };
+      }
+
+      var upd = await update('pos_productos_detalle', detalleId, { stock_actual: nuevoStock });
+      if (upd.error) {
+        var movId = movRes.data && (Array.isArray(movRes.data) ? (movRes.data[0] && movRes.data[0].id) : movRes.data.id);
+        if (movId) {
+          try {
+            await api.delete('pos_movimientos_inventario?id=eq.' + movId);
+          } catch (e) {
+            console.error('[DB] CRITICO: no se pudo eliminar el movimiento huerfano:', movId, e);
+          }
+        }
+        return { data: null, error: 'No se pudo actualizar el stock: ' + upd.error };
+      }
 
       _cacheClear('productos');
 
-      return { data: { stock_anterior: detalle.stock_actual, stock_nuevo: nuevoStock, movimiento: movRes.data }, error: null };
+      return { data: { stock_anterior: stockAnterior, stock_nuevo: nuevoStock, movimiento: movRes.data }, error: null };
     }
   };
 
@@ -410,47 +428,91 @@ window.DB = (function () {
     },
 
     anularConRevertir: async function (id, opts) {
+      // Politica estricta (Fase 30): devuelve el stock (devolucion_venta), marca ANULADA
+      // solo si todo el stock quedo bien, y revierte finanzas al final.
       var user = opts && opts.usuarioId || null;
       var res = await ventas.obtener(id);
       if (res.error || !res.data) return { data: null, error: res.error || 'Venta no encontrada' };
       var v = res.data;
-
-      // Revertir stock de cada detalle (sumar de vuelta)
-      if (v.detalles && v.detalles.length) {
-        for (var i = 0; i < v.detalles.length; i++) {
-          var d = v.detalles[i];
-          await productos.ajustarStock(
-            d.producto_detalle_id,
-            d.cantidad,
-            'entrada_anulacion',
-            'Anulacion venta #' + (v.numero_venta || id),
-            { usuarioId: user }
-          );
-        }
+      if (v.estado !== 'CONFIRMADA' && v.estado !== 'PENDIENTE') {
+        return { data: null, error: 'Solo se pueden anular ventas CONFIRMADAS o PENDIENTES (estado actual: ' + v.estado + ')' };
       }
 
-      // Revertir finanzas mensuales
+      var ref = v.numero_venta || id;
+      var motivo = 'Anulacion venta #' + ref;
+      var aplicados = [];
+
+      var deshacerAplicados = async function () {
+        var fallidos = [];
+        for (var k = aplicados.length - 1; k >= 0; k--) {
+          var a = aplicados[k];
+          var ok = false;
+          var act = await productos.detalleObtener(a.producto_detalle_id);
+          if (!act.error && act.data) {
+            var rev = await update('pos_productos_detalle', a.producto_detalle_id, {
+              stock_actual: parseInt(act.data.stock_actual || 0, 10) - a.cantidad
+            });
+            ok = !rev.error;
+          }
+          if (ok && a.movimientoId) {
+            try { await api.delete('pos_movimientos_inventario?id=eq.' + a.movimientoId); }
+            catch (e) { ok = false; }
+          }
+          if (!ok) fallidos.push(a.codigo || a.producto_detalle_id);
+        }
+        _cacheClear('productos');
+        return fallidos;
+      };
+
+      // Devolver stock de cada detalle (devolucion_venta existe en el CHECK de pos_movimientos_inventario)
+      var detalles = v.detalles || [];
+      for (var i = 0; i < detalles.length; i++) {
+        var d = detalles[i];
+        var codigo = (d.detalle && d.detalle.codigo_interno) || d.producto_detalle_id;
+        var r = await productos.ajustarStock(d.producto_detalle_id, d.cantidad, 'devolucion_venta', motivo, {
+          usuarioId: user,
+          referencia: ref
+        });
+        if (r.error) {
+          var fallidos = await deshacerAplicados();
+          var msg = 'No se pudo devolver el stock de ' + codigo + ': ' + r.error + '. La venta NO fue anulada.';
+          if (fallidos.length) msg += ' ATENCION: revise el stock de ' + fallidos.join(', ');
+          return { data: null, error: msg };
+        }
+        var m = r.data && r.data.movimiento;
+        aplicados.push({
+          producto_detalle_id: d.producto_detalle_id,
+          cantidad: d.cantidad,
+          codigo: codigo,
+          movimientoId: m ? (Array.isArray(m) ? (m[0] && m[0].id) : m.id) : null
+        });
+      }
+
+      // Marcar como ANULADA (solo si todo el stock quedo bien)
+      var upd = await update('pos_ventas', id, { estado: 'ANULADA' });
+      if (upd.error) {
+        var fallidos2 = await deshacerAplicados();
+        var msg2 = 'No se pudo marcar la venta como ANULADA: ' + upd.error + '. El stock fue restaurado.';
+        if (fallidos2.length) msg2 = 'No se pudo marcar la venta como ANULADA: ' + upd.error + '. ATENCION: revise el stock de ' + fallidos2.join(', ');
+        return { data: null, error: msg2 };
+      }
+
+      // Revertir finanzas mensuales (si falla, la venta queda anulada y se advierte)
+      var advertencias = [];
       if (v.fecha_venta) {
         var fd = new Date(v.fecha_venta);
-        var anio = fd.getFullYear();
-        var mes = fd.getMonth() + 1;
         var costoComision = (v.costo_cargo_venta || 0) + (v.costo_impuestos || 0) + (v.costo_envios || 0);
-        var totalDetalles = (v.detalles || []).reduce(function (s, d) {
-          var pc = (d.detalle && d.detalle.precio_compra) || 0;
-          return s + (pc * d.cantidad);
+        var costoMercaderia = detalles.reduce(function (s, x) {
+          var pc = (x.detalle && x.detalle.precio_compra) || 0;
+          return s + (pc * x.cantidad);
         }, 0);
-        await finanzasMensuales.actualizarPorVenta(
-          anio, mes,
-          -(v.total || 0),
-          -(v.descuento || 0),
-          -(costoComision),
-          -(totalDetalles)
+        var fin = await finanzasMensuales.actualizarPorVenta(
+          fd.getFullYear(), fd.getMonth() + 1,
+          -(v.total || 0), -(v.descuento || 0), -costoComision, -costoMercaderia
         );
+        if (fin.error) advertencias.push('La venta se anulo, pero no se pudieron revertir las finanzas del mes: ' + fin.error);
       }
-
-      // Marcar como ANULADA
-      var upd = await update('pos_ventas', id, { estado: 'ANULADA' });
-      return upd;
+      return { data: { venta: (upd.data && upd.data[0]) || null, advertencias: advertencias }, error: null };
     },
 
     obtenerPorPeriodo: async function (usuarioId, desde, hasta, opts) {

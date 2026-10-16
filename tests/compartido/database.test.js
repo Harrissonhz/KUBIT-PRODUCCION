@@ -1166,3 +1166,115 @@ describe('DB.comprasDetalle.recibir', function () {
   });
 
 });
+
+// ═══════════════════════════════════════════════════════════════
+// Fase 30 — Anulacion de ventas con politica estricta
+// ═══════════════════════════════════════════════════════════════
+function mockVentaConfirmada(estado) {
+  return [{
+    id: 'v-1', numero_venta: 'KBT-2026-00010', estado: estado || 'CONFIRMADA',
+    fecha_venta: '2026-10-10T15:00:00', total: 50000, descuento: 0,
+    costo_cargo_venta: 0, costo_impuestos: 0, costo_envios: 0,
+    detalles: [{ producto_detalle_id: 'pd-1', cantidad: 2, detalle: { codigo_interno: 'AL048', precio_compra: 10000 } }]
+  }];
+}
+
+describe('DB.productos.ajustarStock — politica estricta (Fase 30)', function () {
+
+  it('si el movimiento falla, no toca el stock', async function () {
+    window.__supabase.get.mockResolvedValueOnce([{ id: 'pd-1', stock_actual: 5 }]);
+    window.__supabase.post.mockRejectedValue(new Error('Supabase 400: check constraint'));
+
+    var res = await DB.productos.ajustarStock('pd-1', 2, 'devolucion_venta', 'Prueba');
+
+    expect(res.error).toContain('No se pudo registrar el movimiento');
+    expect(window.__supabase.patch).not.toHaveBeenCalled();
+  });
+
+  it('si el stock falla, elimina el movimiento creado', async function () {
+    window.__supabase.get.mockResolvedValueOnce([{ id: 'pd-1', stock_actual: 5 }]);
+    window.__supabase.post.mockResolvedValue([{ id: 'mov-7' }]);
+    window.__supabase.patch.mockRejectedValue(new Error('Supabase 500: Internal Error'));
+
+    var res = await DB.productos.ajustarStock('pd-1', 2, 'devolucion_venta', 'Prueba');
+
+    expect(res.error).toContain('No se pudo actualizar el stock');
+    expect(window.__supabase.delete).toHaveBeenCalledWith('pos_movimientos_inventario?id=eq.mov-7');
+  });
+
+});
+
+describe('DB.ventas.anularConRevertir (Fase 30)', function () {
+
+  it('happy path: devolucion_venta, stock +2, ANULADA y finanzas negativas', async function () {
+    window.__supabase.get
+      .mockResolvedValueOnce(mockVentaConfirmada())
+      .mockResolvedValueOnce([{ id: 'pd-1', stock_actual: 5 }]);
+    window.__supabase.post.mockResolvedValue([{ id: 'mov-1' }]);
+    window.__supabase.patch.mockResolvedValue([{ id: 'ok' }]);
+    window.__supabase.rpc.mockResolvedValue(null);
+
+    var res = await DB.ventas.anularConRevertir('v-1', { usuarioId: 'usr-1' });
+
+    expect(res.error).toBeNull();
+    expect(res.data.advertencias).toEqual([]);
+
+    var mov = window.__supabase.post.mock.calls[0][1];
+    expect(mov.tipo_movimiento).toBe('devolucion_venta');
+    expect(mov.cantidad).toBe(2);
+    expect(mov.motivo).toBe('Anulacion venta #KBT-2026-00010');
+    expect(mov.referencia).toBe('KBT-2026-00010');
+
+    var patchStock = window.__supabase.patch.mock.calls.find(function (c) {
+      return c[0] === 'pos_productos_detalle?id=eq.pd-1';
+    });
+    expect(patchStock[1].stock_actual).toBe(7);
+
+    var patchVenta = window.__supabase.patch.mock.calls.find(function (c) {
+      return c[0] === 'pos_ventas?id=eq.v-1';
+    });
+    expect(patchVenta[1].estado).toBe('ANULADA');
+
+    var fin = window.__supabase.rpc.mock.calls[0][1];
+    expect(fin.p_venta_bruta).toBe(-50000);
+    expect(fin.p_costo_mercaderia).toBe(-20000);
+  });
+
+  it('rechaza anular una venta ya ANULADA', async function () {
+    window.__supabase.get.mockResolvedValueOnce(mockVentaConfirmada('ANULADA'));
+
+    var res = await DB.ventas.anularConRevertir('v-1');
+
+    expect(res.error).toContain('Solo se pueden anular');
+    expect(window.__supabase.post).not.toHaveBeenCalled();
+    expect(window.__supabase.patch).not.toHaveBeenCalled();
+  });
+
+  it('si falla el movimiento, la venta NO se marca ANULADA', async function () {
+    window.__supabase.get
+      .mockResolvedValueOnce(mockVentaConfirmada())
+      .mockResolvedValueOnce([{ id: 'pd-1', stock_actual: 5 }]);
+    window.__supabase.post.mockRejectedValue(new Error('Supabase 400: check constraint'));
+
+    var res = await DB.ventas.anularConRevertir('v-1');
+
+    expect(res.error).toContain('La venta NO fue anulada');
+    expect(window.__supabase.patch).not.toHaveBeenCalled();
+    expect(window.__supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it('si fallan las finanzas, anula y devuelve advertencia', async function () {
+    window.__supabase.get
+      .mockResolvedValueOnce(mockVentaConfirmada())
+      .mockResolvedValueOnce([{ id: 'pd-1', stock_actual: 5 }]);
+    window.__supabase.post.mockResolvedValue([{ id: 'mov-1' }]);
+    window.__supabase.patch.mockResolvedValue([{ id: 'ok' }]);
+    window.__supabase.rpc.mockRejectedValue(new Error('RPC caida'));
+
+    var res = await DB.ventas.anularConRevertir('v-1');
+
+    expect(res.error).toBeNull();
+    expect(res.data.advertencias[0]).toContain('no se pudieron revertir las finanzas');
+  });
+
+});
