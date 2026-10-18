@@ -422,7 +422,7 @@ window.DB = (function () {
         filters: filters,
         search: (opts && opts.search) || null,
         searchFields: ['numero_venta', 'referencia_externa'],
-        orderBy: 'fecha_venta',
+        orderBy: 'fecha_venta.desc,created_at', // Fase 41: en empate, la ultima registrada primero
         orderDir: 'desc',
         page: (opts && opts.page) || 1,
         pageSize: (opts && opts.pageSize) || 20
