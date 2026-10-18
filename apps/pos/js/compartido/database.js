@@ -1540,12 +1540,32 @@ window.DB = (function () {
     }
   };
 
+  // Fase 34: devuelve una URL http(s) valida o null.
+  // - Si el campo trae varias direcciones (separadas por coma, punto y coma o espacio), usa la primera.
+  // - Si no trae esquema (ej. outletshop.co), agrega https://.
+  // - Solo acepta http y https (descarta javascript:, ftp:, etc.).
+  function normalizarUrlTienda(valor) {
+    var s = String(valor || '').trim();
+    if (!s) return null;
+    s = s.split(/[\s,;]+/)[0];
+    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) s = 'https://' + s.replace(/^\/+/, '');
+    if (!/^https?:\/\/[^\s\/$.?#][^\s]*$/i.test(s)) return null;
+    return s;
+  }
   function cargarLinkTienda() {
     var link = document.getElementById('link-tienda-virtual');
     if (!link) return;
     configuracionEmpresa.obtener().then(function (res) {
-      if (res.data && res.data.store_url) {
-        link.href = res.data.store_url;
+      if (res.error) return; // ante un fallo de lectura, el enlace queda como esta
+      var url = normalizarUrlTienda(res.data && res.data.store_url);
+      if (url) {
+        link.href = url;
+        link.classList.remove('hidden');
+        link.style.display = '';
+      } else {
+        // Sin URL valida configurada, el enlace se oculta
+        link.classList.add('hidden');
+        link.style.display = 'none';
       }
     }).catch(function () {});
   }
