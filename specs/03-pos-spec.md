@@ -1,5 +1,7 @@
 # Especificación del Módulo POS - Kubit
 
+> **Ultima actualizacion:** 2026-10-18 (Fases 30 a 41): subsecciones 3.1.4, 3.1.5, 3.4.5, 3.6.2 y 3.7.3; correcciones en 3.1.1, 3.3.2 a 3.3.4, 4.1.1, 9.4 y 12.
+
 ## 1. Descripción General
 El módulo **POS (Point of Sale)** es el núcleo transaccional del ecosistema Kubit. Gestiona ventas presenciales, control de caja, inventario, compras, facturación electrónica (DIAN) y finanzas mensuales para PYMES colombianas.
 
@@ -583,7 +585,7 @@ PENDIENTE → CONFIRMADA → FACTURADA → (opcional) ANULADA
 - **PENDIENTE:** Venta en progreso, no afecta inventario
 - **CONFIRMADA:** Venta completada, descuenta inventario
 - **FACTURADA:** Venta con factura electrónica emitida
-- **ANULADA:** Venta cancelada, reingresa inventario
+- **ANULADA:** Venta cancelada, reingresa inventario mediante movimientos `devolucion_venta` (ver 3.1.4)
 
 #### 3.1.2 Reglas de Negocio
 1. **Número de venta:** Se genera automáticamente con formato `{prefijo_facturacion}-{año}{mes}-{correlativo}` (ej. `KBT-202605-0001`)
@@ -599,6 +601,26 @@ subtotal = SUM(cantidad * precio_unitario - descuento)
 impuesto = subtotal * tasa_impuesto
 total = subtotal + impuesto
 ```
+
+> **Nota (2026-10-18):** en `ventas.js` el IVA se calcula como incluido en el precio (`base = total / (1 + tasa)`), no como suma; el Mostrador (`ventas-rapido.js`) suma 19% fijo encima (pendiente #2). El negocio hoy no cobra IVA (tasa 0%, ver 3.7.3).
+
+#### 3.1.4 Integridad de Stock y Ventas (Fases 30, 39 y 40)
+
+**Regla de oro:** `stock_actual` solo cambia junto con un movimiento en `pos_movimientos_inventario`. Nunca se edita directo.
+
+1. **`DB.productos.ajustarStock()`** inserta primero el movimiento y despues actualiza el stock. Si el movimiento falla, no toca el stock. Si el stock falla, elimina el movimiento recien creado.
+2. **Anular una venta** (`DB.ventas.anularConRevertir()`):
+   - Solo ventas CONFIRMADA o PENDIENTE.
+   - Devuelve el stock con movimientos `devolucion_venta` (motivo `Anulacion venta #<numero>`, `referencia` = numero de venta). El tipo `entrada_anulacion` NO existe en el CHECK de la tabla.
+   - Marca ANULADA solo si todo el stock quedo bien; si un producto falla, deshace los anteriores y no anula.
+   - Revierte las finanzas del mes al final; si eso falla, la venta queda anulada y se devuelve `advertencias[]`.
+3. **Vender** (`ventas.js::procesarVenta()`): si falla el descuento de stock de algun producto, la venta nueva se marca ANULADA y despues se devuelve el stock de lo ya descontado. La pantalla muestra un cuadro que no se cierra solo (`#modal-alerta`) y conserva los datos para reintentar. Si falla el acumulador mensual, la venta se conserva y se avisa en el resumen.
+4. **Editar una venta:** ver 4.1.1.
+
+**Antes de la Fase 30:** el boton "Anular Venta" del historial solo cambiaba el estado (no devolvia stock ni finanzas) y `anularConRevertir()` usaba un tipo de movimiento que la tabla no permite, sin revisar el error.
+
+#### 3.1.5 Historial de Ventas: orden (Fase 41)
+El listado de `ventas-historial.html` se pide a la base ordenado por `fecha_venta` descendente y, en empate, por `created_at` descendente (`DB.ventas.listar()` usa `orderBy: 'fecha_venta.desc,created_at'`). `fecha_venta` tiene precision de minuto, por eso hay empates (por ejemplo, la venta creada al editar hereda la fecha de la original). El orden se pide a la base, no se reordena en el navegador, porque el listado es paginado.
 
 ### 3.2 Caja
 
@@ -636,10 +658,13 @@ CERRADA → ABIERTA → CERRADA
 2. No se puede decrementar stock por debajo de 0
 3. `stock_min` y `stock_max` son alertas, no restricciones
 4. Las ventas y compras generan movimientos de inventario automáticamente al confirmarse
-5. El campo `referencia` almacena el ID de la venta o compra que originó el movimiento
+5. El campo `referencia` identifica el origen del movimiento: el numero de venta (anulaciones) o `OC-<numero>` (recepciones de compra). Las salidas por venta aun no la llenan (pendiente #5)
+6. `stock_actual` solo cambia con un movimiento (ver 3.1.4). La ficha de producto no modifica el stock: al editar, el campo es de solo lectura y el cambio se hace desde Inventario (entradas, salidas, ajustes)
+7. Al crear un producto o una variante, el stock nace en 0 y el stock inicial se registra como movimiento `ajuste_incremento` con motivo "Stock inicial" (Fase 31)
+8. Los productos con `tipo_producto = 'Digital'` (cursos, domicilio) no son mercancia fisica: se excluyen de los indicadores de inventario (ver 9.4)
 
 #### 3.3.3 Stock Bajo
-Cuando `stock_actual <= stock_min`, el sistema debe:
+Por SKU (variante): **Agotado** cuando `stock_actual <= 0`; **Stock Bajo** cuando `stock_actual > 0` y `stock_actual <= stock_min` (2 si la variante no tiene minimo definido). Panel y Reportes aplican esta regla (ver 9.4). El sistema debe:
 - Mostrar una alerta visual en la interfaz de ventas
 - Notificar en el dashboard principal
 
@@ -652,6 +677,8 @@ Las 4 cards del Resumen de Inventario en la pagina `inventario.html` funcionan c
 | Con Stock | `con_stock` | `stock_actual > 10` | emerald-400/50 |
 | Stock Bajo | `stock_bajo` | `stock_actual > 0` y `stock_actual <= 10` | amber-400/50 |
 | Agotados | `agotados` | `stock_actual === 0` | red-400/50 |
+
+> **Nota (2026-10-18):** esta pantalla usa el tope fijo de 10 unidades para "Stock Bajo"; Panel y Reportes usan el minimo de cada SKU (3.3.3). Pendiente unificar.
 
 **Comportamiento:**
 1. Click en una card activa el filtro: la card se resalta con `ring-2` del color correspondiente
@@ -734,6 +761,9 @@ PENDIENTE → CONFIRMADA → RECIBIDA → (opcional) ANULADA
 
 **Tests:** `tests/compartido/database.test.js > DB.comprasDetalle.recibir` cubre: happy path total (detalle+movimiento+stock+estado), recepcion parcial (PENDIENTE/RECIBIENDO), fallo de movimiento (revertir detalle), fallo de stock (eliminar movimiento + revertir) y sobre-recepcion.
 
+#### 3.4.5 Buscador de Ordenes de Compra (Fase 38)
+`compras.js::filtrarYRender()` filtra en el navegador por numero de orden, proveedor y **Notas** (coincidencia parcial, sin distinguir mayusculas), combinado con los filtros de estado y proveedor. Las Notas guardan el ID de la compra en la plataforma de origen, por lo que se puede buscar una orden escribiendo todo el ID o solo parte de el.
+
 ### 3.5 Facturación Electrónica (DIAN)
 
 #### 3.5.1 Ciclo de Vida
@@ -763,6 +793,32 @@ BORRADOR → EMITIDA → ACEPTADA → (opcional) ANULADA
    ```
 3. El resumen mensual se genera de forma automática al cierre del mes (batch programado)
 
+#### 3.6.2 Conciliacion del acumulador mensual
+`pos_finanzas_mensuales` se actualiza al vender y al anular (RPC `actualizar_finanzas_mensuales`). Debe cuadrar con `pos_ventas` por mes (zona `America/Bogota`): `ventas_brutas` = suma de `total` de las ventas CONFIRMADA/FACTURADA y `costos_comision_total` = suma de `costo_cargo_venta + costo_impuestos + costo_envios`. Ejecutar la conciliacion una vez al mes:
+
+```sql
+with reales as (
+  select date_part('year',  fecha_venta at time zone 'America/Bogota')::int as anio,
+         date_part('month', fecha_venta at time zone 'America/Bogota')::int as mes,
+         sum(total) as ventas,
+         sum(coalesce(costo_cargo_venta,0) + coalesce(costo_impuestos,0) + coalesce(costo_envios,0)) as comisiones
+  from pos_ventas
+  where estado in ('CONFIRMADA','FACTURADA') and deleted_at is null
+  group by 1, 2
+)
+select f.anio, f.mes, f.ventas_brutas - coalesce(r.ventas,0) as dif_ventas,
+       f.costos_comision_total - coalesce(r.comisiones,0) as dif_comision
+from pos_finanzas_mensuales f
+left join reales r on r.anio = f.anio and r.mes = f.mes
+where f.deleted_at is null and f.anio * 100 + f.mes >= 202511
+  and (f.ventas_brutas <> coalesce(r.ventas,0) or f.costos_comision_total <> coalesce(r.comisiones,0))
+order by f.anio, f.mes;
+```
+
+**Resultado esperado:** solo nov 2025, con una diferencia de ventas por las ventas importadas desde CSV antes de existir el POS (no se corrige). Cualquier otra fila indica una venta o una anulacion que no actualizo el acumulador.
+
+**Antecedente (corregido el 2026-10-18):** las anulaciones hechas con el boton antiguo del historial (antes de la Fase 30) no restaban del acumulador; se corrigieron en datos las filas de ago, sep y oct 2026.
+
 ### 3.7 Productos
 
 #### 3.7.1 Atributos Dinámicos
@@ -780,6 +836,13 @@ El campo `atributos` (JSONB) en `pos_productos_detalle` permite almacenar atribu
 - `tipo` puede ser: `imagen`, `video`, `documento`
 - `orden` define la posición de visualización (0 = principal)
 - `alt_text` es obligatorio para imágenes (accesibilidad)
+
+#### 3.7.3 IVA (`tasa_impuesto`) (Fases 32 y 33)
+- El negocio no cobra IVA: los productos (`tasa_impuesto`) y la empresa (`impuesto_default`) nacen en 0% (exento). El selector conserva 0%, 5% y 19% para uso futuro.
+- `0` es un valor valido. En `productos.js` y `configuracion.js` no se usa `x || 0.19` ni `x || '19'` (el 0 cuenta como vacio); se usa `parseFloat(v)` y `isNaN(v) ? 0 : v`.
+- `tasa_impuesto` es decimal (0.19). `impuesto_default` se guarda tal como lo muestra el selector (0, 5 o 19).
+- Nada mas lee `impuesto_default` (confirmado por busqueda en el codigo el 2026-10-18).
+- Al 2026-10-18, ninguna de las 683 ventas registradas tiene IVA.
 
 ---
 
@@ -804,9 +867,15 @@ Selecciona método de pago → Confirma venta →
   3. Este orden (CREATE primero, VOID despues) mitiga la perdida de datos: si falla la creacion, la venta original permanece intacta
 - El flujo se dispara desde el boton **Editar** en el modal de detalle de `ventas-historial.html`
 - Los datos se transfieren via `sessionStorage` (`kubit_editar_venta`) + query param `?editar=ID`
-- El metodo `DB.ventas.anularConRevertir()` maneja: revertir stock (movimiento `entrada_anulacion`), revertir finanzas mensuales (valores negativos), y cambiar estado a ANULADA
+- El metodo `DB.ventas.anularConRevertir()` maneja: revertir stock (movimiento `devolucion_venta`; el tipo `entrada_anulacion` NO existe), revertir finanzas mensuales (valores negativos), y cambiar estado a ANULADA (ver 3.1.4)
 - Ventas en estado **PENDIENTE** o **CONFIRMADA** son elegibles para edicion
 - Boton Editar deshabilitado para FACTURADA, ANULADA u otros estados
+- **Proteccion contra duplicados (Fase 39):** antes de crear la venta nueva se verifica que la original siga CONFIRMADA o PENDIENTE. Si ya se anulo o se edito, no se guarda nada y no se consume numero de venta
+- Si falla anular la original, se anula la venta nueva con `anularConRevertir()`: la original sigue vigente, la pantalla lo explica y los datos quedan para reintentar
+- Si tambien falla deshacer la nueva, un cuadro que no se cierra solo (`#modal-alerta`) muestra los dos numeros de venta e indica anular una desde Historial
+- **"Limpiar Formulario" cancela la edicion (Fase 40):** la venta que se registre despues es nueva y la original queda intacta
+- **Limitacion conocida:** editar una venta de la ultima unidad no funciona (la validacion de stock no suma las unidades de la original); hay que anularla en Historial y registrarla de nuevo (pendiente #17)
+- Cada venta deshecha consume un numero de venta y deja una venta ANULADA en el Historial
 - Esta politica aplica por integridad de inventario, contabilidad y compliance DIAN
 
 ### 4.2 Flujo de Apertura y Cierre de Caja
@@ -980,10 +1049,15 @@ Grid 8-columnas responsive (`grid-cols-2 sm:grid-cols-4 lg:grid-cols-8`). Sin fi
 | $ Hoy | `#kpi-op-total-hoy` | `DB.ventas.estadisticasHoy().total` | Total en dinero vendido hoy |
 | Ticket Prom. Hoy | `#kpi-op-ticket-prom` | `DB.ventas.estadisticasHoy().promedio` | Venta promedio del dia |
 | Prod. Hoy | `#kpi-op-prod-hoy` | `DB.ventas.productosVendidosHoy()` via join embed `pos_ventas -> pos_ventas_detalle` | Unidades vendidas hoy (cantidad total de items) |
-| Total Productos | `#kpi-inv-total` | `DB.productos.listarConDetalle()` (conteo unico por `producto_id`) | Cantidad de productos distintos en catalogo |
-| Stock Bajo | `#kpi-inv-stock-bajo` | `DB.productos.listarConDetalle()` | Detalles con `stock_actual <= stock_min` (default 2) y stock > 0 |
-| Agotados | `#kpi-inv-agotados` | `DB.productos.listarConDetalle()` | Detalles con `stock_actual <= 0` |
-| Valor Inventario | `#kpi-inv-valor` | `DB.productos.listarConDetalle()` (suma `stock_actual * costo_unitario` donde `costo_unitario = precio_compra > 0 ? precio_compra : precio_venta / 1.30`) | Valor total del inventario a costo estimado |
+| Total SKU | `#kpi-inv-total` | `DB.productos.listarConDetalle()` (cuenta variantes; excluye productos `Digital`) | Cantidad de SKU fisicos (variantes) |
+| Stock Bajo | `#kpi-inv-stock-bajo` | `DB.productos.listarConDetalle()` | SKU con `stock_actual > 0` y `stock_actual <= stock_min` (2 si no tiene minimo) |
+| Agotados | `#kpi-inv-agotados` | `DB.productos.listarConDetalle()` | SKU con `stock_actual <= 0` |
+| Valor Inventario PVP | `#kpi-inv-valor` | `DB.productos.listarConDetalle()` (suma `precio_venta * stock_actual`, solo stock positivo, redondeada a pesos) | Valor del inventario a precio de venta |
+
+**Reglas de los indicadores de inventario (Fases 35 a 37):**
+- Panel y Reportes (pestana Inventario) usan la misma regla por SKU (variante) y muestran los mismos numeros
+- Se excluyen los productos con `tipo_producto = 'Digital'` (leidos con `DB.select('pos_productos', { select: 'id', filters: [{ col: 'tipo_producto', val: 'Digital' }] })`); si esa lectura falla, los cuatro indicadores muestran `---`
+- La formula anterior del valor (costo, o `precio_venta / 1.30` si no habia costo) ya no se usa: mezclaba costo con venta y sumaba las unidades de los productos digitales
 
 ### 9.5 Top 5 Productos del Periodo (con filtros)
 Agrega `pos_ventas_detalle` del periodo filtrado (mes/año + canal opcional), agrupando por `producto_detalle_id` y ordenando por cantidad descendente. Reside en `panel.js::cargarTopProductos()` — NO usa `DB.ventas.topProductos()` (que es solo para mes actual sin filtro de canal). El ranking visual usa medallas de posicion:
@@ -1318,7 +1392,7 @@ $('btn-cuenta-cobro').addEventListener('click', function () {
 La URL de la tienda virtual se configura en `pos_configuracion_empresa.store_url` y se edita desde `configuracion.html` (campo `#campo-store-url`).
 
 ### 12.2 Carga Dinámica en Sidebar
-El bloque autoejecutable `cargarLinkTienda()` al final de `database.js` busca `#link-tienda-virtual` en todas las paginas POS y asigna `href` desde la DB. Si `store_url` es null/vacio, el link queda con `href="#"` (no navega).
+El bloque `cargarLinkTienda()` al final de `database.js` busca `#link-tienda-virtual` en todas las paginas POS y asigna `href` desde la DB. `normalizarUrlTienda()` (Fase 34) usa la primera direccion si `store_url` trae varias (separadas por coma, punto y coma o espacio), agrega `https://` si falta y acepta solo http/https. Si `store_url` esta vacio o no es valido, el enlace se **oculta**; si falla la lectura, no cambia nada. Cada ambiente guarda su propia URL.
 
 ### 12.3 Comportamiento
 - El link abre en nueva pestaña (`target="_blank" rel="noopener noreferrer"`)

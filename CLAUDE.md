@@ -2,6 +2,8 @@
 
 Este archivo es la **memoria oficial del proyecto** para cualquier IA que trabaje en el ecosistema Kubit. Contiene las reglas, el stack, las decisiones ya tomadas y el estado actual del desarrollo. Leerlo completo antes de cualquier intervención.
 
+**Ultima actualizacion:** 2026-10-18 — se documentaron las Fases 30 a 41 del POS (secciones 5, 7.2, 7.3, 10 y 13).
+
 ---
 
 ## 1. Reglas para la IA (No Alucinar)
@@ -144,7 +146,7 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 | Diseño UI | Ultra-minimalista, monocromático Slate (Tailwind) |
 | Responsive | Mobile-first, mínimo 360px |
 | Navegación | Sin frameworks SPA. HTML vanilla con navegación tradicional o Alpine.js ligero si es necesario |
-| Editar ventas confirmadas | NO permitido edicion directa. Usar **Void + Recreate**: crear la nueva venta PRIMERO, solo si exito anular la original (orden invertido para mitigar perdida de datos). Metodo `DB.ventas.anularConRevertir()` revierte stock + finanzas. sessionStorage + query param `?editar=ID` para transferencia de datos. Boton "Editar" en modal de ventas-historial. |
+| Editar ventas confirmadas | NO permitido edicion directa. Usar **Void + Recreate**: crear la nueva venta PRIMERO, solo si exito anular la original con `DB.ventas.anularConRevertir()` (revierte stock con `devolucion_venta` + finanzas). `sessionStorage` (`kubit_editar_venta`) + query param `?editar=ID` para transferencia de datos. Boton "Editar" en modal de ventas-historial. Desde las Fases 39-40 el flujo es a prueba de duplicados: ver la fila "Vender y editar sin dejar ventas a medias". |
 | Header POS | `fixed top-0 left-0 right-0 z-30` en todas las páginas. El contenido tiene `pt-16` para compensar |
 | Modo oscuro por defecto | Todas las páginas cargan con `class="dark"` en `<html>`. Anti-flash script: si localStorage dice `'false'` lo remueve |
 | Sección de usuario en header | Centralizada en `auth.js::poblarUserHeader()`. Solo requiere los IDs `user-avatar`, `user-name`, `user-rol` en el HTML |
@@ -184,11 +186,27 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 | Rol admin duplicado eliminado | El rol `admin` (UUID `00000000-0000-0000-0000-000000000001`) se creo en la migracion V1 como copia del seed `Administrador`. Todos sus usuarios se migraron al rol `Administrador` real (UUID `6442e6cd-...`). Luego se elimino el rol y sus `pos_rol_permisos`. Ahora solo existe 1 rol de administracion. |
 | Zona horaria Colombia | La base de datos usa `America/Bogota` (UTC-5). Configurado via `ALTER DATABASE postgres SET timezone = 'America/Bogota'`. Esto permite que strings de fecha sin timezone (ej. `2026-07-05T00:00:00`) se interpreten como hora Colombia. Las columnas `timestamptz` siguen almacenando UTC internamente. No migra datos existentes. El script `13-migrate-timezone.sql` contiene este cambio para despliegue en produccion. |
 | Gastos en vivo desde detalle | El KPI "Gastos" del Panel Dashboard NO debe leer `pos_finanzas_mensuales.gastos_operativos_total` (tabla pre-agregada que nunca se actualiza al crear/editar gastos). En su lugar usa `DB.gastos.totalDelMes()` que suma `monto` en vivo desde `pos_gastos_mensuales_detalle` via PostgREST, mismo patron que `DB.compras.totalDelMes()`. |
-| Valor Inventario con precio_compra + estimacion | El KPI "Valor Inventario" se calcula como `sum(stock_actual * costo_unitario)` para TODAS las variantes (sin dedup). `costo_unitario = precio_compra` si existe (`> 0`), sino se estima como `precio_venta / 1.30` (margen default 30%). Esto evita inflar con margenes no realizados y funciona con datos historicos incompletos de V1. |
+| Indicadores de inventario por SKU (Fases 35-37) | Panel y Reportes (pestana Inventario) usan la misma regla por SKU (variante): **Total SKU** = cantidad de variantes fisicas; **Agotados** = `stock_actual <= 0`; **Stock Bajo** = `stock_actual > 0` y `stock_actual <= stock_min` (2 si el SKU no tiene minimo); **Valor Inventario PVP** = suma de `precio_venta * stock_actual` (solo stock positivo), redondeado a pesos. Reemplaza la formula anterior (costo, o `precio_venta / 1.30` si no habia costo), que mezclaba costo con venta y contaba los productos digitales. Pendiente: la pantalla Inventario (`inventario.html`) sigue usando el tope fijo de 10 unidades para "Stock Bajo". |
 | Productos Vendidos Hoy | Nuevo KPI operativo que suma `cantidad` de `pos_ventas_detalle` para ventas CONFIRMADA del dia actual, via `DB.ventas.productosVendidosHoy()` usando PostgREST join embed `pos_ventas -> pos_ventas_detalle`. |
 | Datos historicos en ventas_netas | `pos_finanzas_mensuales.ventas_brutas` migro desde V1 solo a partir de Nov 2025. Meses anteriores (Sep 2023-Oct 2025) tienen `ventas_brutas=0` y datos reales en `ventas_netas`. `porMes()` y `cargarKpisMes()` usan `ventas_brutas || ventas_netas || 0` como fallback. |
 | Tendencia de Ventas (multi-year line chart) | El grafico "Tendencia de Ventas" usa `DB.ventas.todosLosAnios()` que consulta `pos_finanzas_mensuales` completo. Una linea por ano con `spanGaps:false` (null en meses sin datos). Paleta progresiva slate (mas antiguo) → sky → emerald (mas reciente). Tabla resumen con total, crecimiento %, promedio mensual y barra visual. |
 | Rango de anos en dropdowns | `filtro-anio`, `chart-anio`, `comp-anio1`, `comp-anio2` generados con `for (a = anioAct + 1; a >= 2023; a--)`. Incluye 2023 porque hay datos desde Sep 2023. |
+| Recepcion de Compras solo via flujo recibir() | El estado "RECIBIDA" NO debe asignarse directamente via dropdown `campo-estado` + PATCH. El unico camino valido es mediante `DB.comprasDetalle.recibir()` que crea movimiento de inventario (`entrada_compra`), actualiza `stock_actual` en `pos_productos_detalle` y establece `cantidad_recibida`. Ver `compras.js::guardar()` que ahora detecta cambio a RECIBIDA y auto-ejecuta recibir() para cada item pendiente. |
+| Smart Stats Filter (Inventario) | Las 4 cards del Resumen de Inventario (Total Productos, Con Stock, Stock Bajo, Agotados) son clickeables con `data-stat` y actuan como filtro AND con el buscador de texto sobre la tabla de Existencias Actuales. Click en una card activa el filtro con `ring-2` del color correspondiente. Click en la misma card o en el pill `✕` lo desactiva. `FILTRO_RESUMEN` es la variable de estado. `aplicarFiltroResumen()` y `actualizarFiltroUI()` manejan la logica. Sin cambios en DB — todo client-side sobre `PRODUCTOS_DETALLE`. |
+| Politica estricta de recepcion | `database.js::recibir()` NUNCA deja un item marcado recibido sin inventario. Si falla el INSERT del movimiento → revierte el PATCH del detalle y retorna error visible. Si falla el update de `stock_actual` → elimina el movimiento huerfano (hard delete), revierte el detalle y retorna error. Causa raiz: en produccion (OC #64, SKU AL115-Rosa) una recepcion actualizo el detalle pero movimiento+stock fallaron silenciosamente dejando stock DB=12 vs fisico=17 |
+| Proteccion de estado en guardar compras | `compras.js::guardar()` (modo edicion) recalcula el estado desde los detalles reales si el dropdown dice PENDIENTE: todos RECIBIDO → fuerza RECIBIDA, algunos → RECIBIENDO, con toast informativo. Nunca revierte una recepcion ya registrada. Causa raiz: OC #63 quedo PENDIENTE con 7/7 items recibidos porque un Guardar posterior sobrescribio el estado desde el dropdown desactualizado |
+| checkTodos excluye soft-deleted a proposito | El query de `recibir()` que decide RECIBIDA/RECIBIENDO usa el filtro default (`deleted_at=is.null`): las filas soft-deleted ya no hacen parte de la orden y no deben bloquear el paso a RECIBIDA. A diferencia del lookup de variante que SI usa `incluirEliminados:true` (el stock debe actualizarse siempre) |
+| Productos digitales fuera del inventario (Fases 35-37) | Los productos con `tipo_producto = 'Digital'` (cursos y domicilio) tienen stock simbolico enorme y NO son mercancia fisica: Panel y Reportes los excluyen de los 4 indicadores de inventario. Se leen con `DB.select('pos_productos', { select: 'id', filters: [{ col: 'tipo_producto', val: 'Digital' }] })`; si esa lectura falla, los indicadores muestran `---`. |
+| El stock solo cambia con movimientos (Fases 30-31) | `stock_actual` solo se modifica con `DB.productos.ajustarStock()`: inserta PRIMERO el movimiento en `pos_movimientos_inventario` y despues actualiza el stock; si falla el stock, borra el movimiento (nunca queda stock cambiado sin movimiento). `detalleActualizar()` ignora `stock_actual`. La ficha de producto no envia stock al editar: el campo es de solo lectura y se cambia desde Inventario (entradas/salidas). Al crear un producto o una variante nace con stock 0 y el stock inicial se registra como `ajuste_incremento` con motivo "Stock inicial". Causa raiz: antes la ficha reescribia `stock_actual` con el valor cargado al abrirla, sin movimiento, y descuadraba el inventario. El WMS (`apps/wms`) solo lee `pos_*` y `st_*` y depende de que cada cambio de stock deje un movimiento. |
+| Anular una venta (Fase 30) | `DB.ventas.anularConRevertir()` es el unico camino: solo ventas CONFIRMADA o PENDIENTE; devuelve el stock con movimientos `devolucion_venta` (motivo `Anulacion venta #<numero>`, `referencia` = numero de venta); marca ANULADA solo si todo el stock quedo bien (si un producto falla, deshace los anteriores y no anula); revierte las finanzas del mes al final y, si eso falla, devuelve `advertencias[]`. `entrada_anulacion` NO existe en el CHECK de `pos_movimientos_inventario`: no usarlo. El boton "Anular Venta" del historial usa `anularConRevertir()` (antes `DB.ventas.anular()` solo cambiaba el estado). El WMS aun no procesa `devolucion_venta` (D2 pendiente). |
+| Vender y editar sin dejar ventas a medias (Fases 39-40) | `ventas.js::procesarVenta()`: (1) al editar, antes de crear verifica que la venta original siga CONFIRMADA o PENDIENTE; (2) si falla el descuento de stock de algun producto, marca la venta nueva ANULADA y despues devuelve el stock de lo ya descontado (`revertirVentaNueva()`); (3) si falla anular la original, anula la venta nueva con `anularConRevertir()` y la original sigue vigente; (4) si tambien falla deshacer la nueva, muestra el cuadro persistente `#modal-alerta` con los dos numeros de venta; (5) si falla el acumulador mensual, la venta se conserva y se avisa en el resumen. "Limpiar Formulario" cancela la edicion (`VENTA_EDITANDO_ID = null`). Limitacion conocida: no se puede editar una venta de la ultima unidad (la validacion de stock no suma las unidades de la original); hay que anularla desde Historial y registrarla de nuevo. |
+| Acumulador mensual cuadrado con las ventas (bug #3) | `pos_finanzas_mensuales` debe cuadrar con `pos_ventas` por mes (zona `America/Bogota`): `ventas_brutas` = suma de `total` de ventas CONFIRMADA/FACTURADA y `costos_comision_total` = suma de `costo_cargo_venta + costo_impuestos + costo_envios`. Las anulaciones hechas con el boton antiguo (antes de la Fase 30) no restaban y se corrigieron en datos (ago-oct 2026). Se verifica una vez al mes con la conciliacion de `specs/03-pos-spec.md` §3.6.2: debe quedar solo nov 2025 (ventas importadas desde CSV antes del POS, no se tocan). |
+| IVA exento por defecto (Fases 32-33) | El negocio no cobra IVA: productos y empresa nacen en 0% (exento). `tasa_impuesto` e `impuesto_default` aceptan 0 como valor valido: NUNCA usar `x \|\| 0.19` ni `x \|\| '19'` (el 0 cuenta como vacio); usar `parseFloat(v)` y `isNaN(v) ? 0 : v`. El selector conserva 0%, 5% y 19% por si se activa en el futuro. `ventas.js` trata el precio como IVA incluido (`base = total / (1 + tasa)`); el Mostrador suma 19% fijo encima (bug #2 pendiente). |
+| Enlace Tienda Virtual desde Configuracion (Fase 34) | El menu lee `pos_configuracion_empresa.store_url` (cada ambiente guarda su propia URL). `database.js::normalizarUrlTienda()` usa la primera direccion si hay varias separadas por coma, punto y coma o espacio, agrega `https://` si falta, acepta solo http/https y oculta el enlace si queda vacio o invalido; si falla la lectura no cambia nada. |
+| Buscador de Ordenes de Compra (Fase 38) | `compras.js::filtrarYRender()` filtra en el navegador por numero de orden, proveedor y Notas (coincidencia parcial, sin distinguir mayusculas), combinado con los filtros de estado y proveedor. Las Notas guardan el ID de la compra en la plataforma de origen. |
+| Orden del Historial de Ventas (Fase 41) | `DB.ventas.listar()` ordena por `fecha_venta.desc,created_at` (mas reciente primero; en empate, la ultima registrada primero). `fecha_venta` tiene precision de minuto, por eso el desempate. El orden se pide a la base porque el listado es paginado. |
+| Llave `service_role` y `config.js` | `apps/pos/js/config.js` va en el repositorio (Vercel sirve el POS desde Git) y lleva SOLO la URL y la llave publica `anon`. La llave `service_role` NUNCA va en el frontend ni en GitHub: `supabaseServiceKey` queda `''`. Por eso crear usuarios y cambiar contrasenas ya no funcionan desde el POS: se hacen en Supabase (Authentication > Users). No copiar `config.js` entre ambientes (QA y produccion tienen el suyo). |
+| Flujo de cambios al POS | Un bug o cambio a la vez. Se prueba primero en la carpeta de pruebas (conectada a la base de QA) y despues se lleva a produccion con un solo commit. Cada despliegue sube la version del cache del service worker (`kubit-pos-YYYYMMDD-NN`). `npm test` debe pasar antes del commit (119 pruebas). POS y Tienda usan Ignored Build Step en Vercel (solo se publican si cambia su carpeta). |
 
 ---
 
@@ -385,6 +403,17 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 - [x] Migrar datos Fase 3 — Ventas, Compras, Movimientos: `10-migrate-ventas.sql` + `11-migrate-compras.sql` + `12-migrate-movimientos.sql` + `08b-relink-ventas-gastos.sql`
 - [ ] Agregar más categorías a la DB para poblar el menú del navbar
 - [ ] Asignar tags en DB a productos existentes para poblar carrusel y badges (UI ya implementada en POS y Store)
+- [ ] Bug #2 Mostrador (`ventas-rapido.js`): suma 19% fijo de IVA, no descuenta stock ni actualiza el acumulador mensual. Nunca se ha usado.
+- [ ] Bug #5: las salidas por venta (`salida_venta`) no llenan `referencia` en `pos_movimientos_inventario` (el numero de venta solo esta en el motivo).
+- [ ] Bug #6: 16 movimientos `entrada_compra` tienen como `referencia` un numero de venta (`V-...`).
+- [ ] Bug #9: 49 de 94 ordenes de compra tienen IVA calculado ($630.089,82); el total pagado no cambia, solo el desglose.
+- [ ] Bug #12: crear usuario y cambiar contrasena muestran el error tecnico de Supabase (hoy ya no funcionan desde el POS).
+- [ ] Bug #13: la tabla de alertas de Reportes lee `d.nombre`, `d.sku` y `d.stock_minimo`, que no existen (nombre en `d.producto.nombre`, codigo en `d.codigo_interno`, minimo en `d.stock_min`).
+- [ ] Bug #14: el descuento global se resta dos veces en `ventas_netas` (hoy el descuento es 0).
+- [ ] Bug #16: "Rentabilidad TOTAL" suma `ventas_netas`.
+- [ ] Bug #17: editar una venta de la ultima unidad (la validacion de stock no suma las unidades de la original).
+- [ ] Unificar la regla de "Stock Bajo" de `inventario.html` (tope fijo de 10) con la de Panel y Reportes (minimo del SKU).
+- [ ] Revision de seguridad en detalle (a tratar aparte).
 
 ### 7.5 Completado (Documentacion de Migracion)
 - [x] `specs/14-migracion-datos.md` — Spec completo de migracion V1→V2 con analisis campo a campo de 8 tablas (actualizado con Fase 2 y Fase 3)
@@ -490,6 +519,100 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 - [x] Orden de graficos reorganizado: Ventas Mensuales → Comparativa+Top5 → Tendencia → Accesos Rapidos
 - [x] `npm test` → 105 passed, 0 failures
 
+#### Modulo POS — Fase 25: Grafico Ingresos vs Gastos (Panel Dashboard)
+- [x] `database.js` — Nuevo metodo `DB.finanzasMensuales.obtenerIngresosVsGastos(anio)`: query a `pos_finanzas_mensuales` por ano, retorna 12 meses con `ingresos`, `gastos` (CMV + gastos operativos + comisiones + compras + otros gastos) y `utilidad` (ingresos - gastos). Suplementa mes actual con datos en vivo desde `estadisticasDelPeriodo`, `totalDelMes` y `compras.totalDelMes`.
+- [x] `panel.html` — Nueva card "Ingresos vs Gastos" entre Comparativa Anual y Tendencia de Ventas con canvas `#ingresosVsGastosChart` 280px + selector de ano `#ivg-anio`.
+- [x] `panel.js` — Nueva funcion `cargarIngresosVsGastos()`: Chart.js grouped bar chart con 3 datasets (Ingresos esmeralda, Gastos+Costos rosa, Utilidad Neta sky). Variable `chartIngresosVsGastos`. Selector `#ivg-anio` populado via `poblarSelectores()`. Listener independiente en `bindearFiltros()`. Integrado en `cargarTodo()` via `Promise.all`.
+- [x] `service-worker.js` — Bump de cache version `kubit-pos-20260713-01`. Agregados `panel.html` y `js/paginas/panel.js` al precache ASSETS.
+- [x] Fix: Eliminada linea residual `labelAnio.textContent = anio` que borraba los `<option>` del `<select>` al asignar `.textContent` (reliquia de cuando `#ivg-anio` era un `<span>`).
+- [x] `npm test` → 105 passed, 0 failures
+
+#### Modulo POS — Fase 26: Rentabilidad TOTAL (Panel Dashboard)
+- [x] `panel.html` — Nuevo bloque "Rentabilidad TOTAL" insertado ANTES de Accesos Rapidos. 12 KPIs en 3 filas `grid-cols-2 sm:grid-cols-4`: Fila 1 (Ventas Brutas, CMV, Utilidad Bruta, % Margen Bruto), Fila 2 (Gastos+Comisiones, Utilidad Neta, % Margen Neto, ROI), Fila 3 (Inversion Inicial, % Gastos/Ventas, Relacion CMV/Ventas, Break-even). IDs: `kpi-total-*`.
+- [x] `database.js` — Nuevo metodo `DB.finanzasMensuales.obtenerTotalesHistoricos()`: ejecuta 5 queries en paralelo via `Promise.all`:
+  - `ventas_brutas`: SUM de `ventas_netas` de `pos_finanzas_mensuales` (todo el historial)
+  - `cmv_gastos`: SUM de `pos_gastos_mensuales_detalle` WHERE categoria IN (Pago Proveedores, Flete China-Colombia, Flete Bog-Med)
+  - `cmv_compras`: SUM de `pos_compras.total` WHERE estado != 'ANULADA'
+  - `gastos_comisiones`: SUM de `pos_gastos_mensuales_detalle` WHERE categoria NOT IN (6 categorias: 3 CMV + 3 Inversion Inicial)
+  - `inversion_inicial`: SUM de `pos_gastos_mensuales_detalle` WHERE categoria IN (Membresia Club Importadores, TiendaVirtual, Insumos Tecnologicos)
+  - Retorna: `{ ventas_brutas, cmv, gastos_comisiones, inversion_inicial, meses_operacion }`
+- [x] `panel.js` — Nueva funcion `cargarKpisTotales()`: calcula Utilidad Bruta, % Margen Bruto, Utilidad Neta, % Margen Neto, ROI, % Gastos/Ventas, Relacion CMV/Ventas, Break-even. Puebla los 12 KPIs. Integrada en `cargarTodo()` via `Promise.all`.
+- [x] `panel.js` — Break-even muestra `---` si Utilidad Neta ≤ 0 (no ha generado ganancia).
+- [x] `npm test` → 105 passed, 0 failures
+
+#### Modulo POS — Fase 27: Fix Recepcion de Compras (Bug preventivo)
+- [x] **Bug #1 (Raiz):** `compras.js::guardar()` ahora detecta cuando `estado === 'RECIBIDA'` y ejecuta automaticamente `DB.comprasDetalle.recibir()` para cada item pendiente. Antes el dropdown `campo-estado` permitia marcar RECIBIDA via simple PATCH, saltandose la creacion de movimiento de inventario, actualizacion de `stock_actual` y asignacion de `cantidad_recibida`.
+- [x] **Bug #2:** `database.js::recibir()` agregado `incluirEliminados: true` en el query a `pos_productos_detalle`. Sin esto, si la variante estaba soft-deleted, el stock update se saltaba silenciosamente (el `select()` helper agrega `deleted_at=is.null` por defecto).
+- [x] **Bug #3:** `database.js::recibir()` agregado `_cacheClear('productos')` antes del return para que el cache de productos no quede con `stock_actual` desactualizado.
+- [x] `npm test` → 105 passed, 0 failures
+
+#### Modulo POS — Fase 28: Smart Stats Filter (Filtro Interactivo en Inventario)
+- [x] `inventario.html` — Cards de resumen ahora con `data-stat`, `cursor-pointer`, `hover:ring-2`, IDs unicos (`#card-stat-*`). Nuevo contenedor `#filtro-activo` con pill de filtro y boton `✕` entre buscador y tabla de existencias.
+- [x] `inventario.js` — Nueva variable `FILTRO_RESUMEN` (null | 'con_stock' | 'stock_bajo' | 'agotados'). `obtenerListaFiltrada()` aplica AND entre filtro de resumen y texto. `aplicarFiltroResumen(tipo)` (toggle ON/OFF + paginacion reset + smooth scroll). `actualizarFiltroUI()` (ring-2 color en card activa, show/hide pill con label). Click handlers adjuntados una sola vez en `renderizarResumen()` via flag `window._resumenHandlersAttached`. Boton `#btn-limpiar-filtro` limpia filtro y re-renderiza.
+- [x] Sin cambios en DB — todo client-side sobre `PRODUCTOS_DETALLE`.
+- [x] `npm test` → 105 passed, 0 failures
+
+#### Modulo POS — Fase 29: Politica Estricta de Recepcion + Proteccion de Estado (Fix bugs OC #63/#64)
+- [x] `database.js::recibir()` — Politica estricta: si el INSERT del movimiento falla → revierte el PATCH del detalle y retorna error visible. Si el update de `stock_actual` falla → elimina el movimiento huerfano (hard delete via `api.delete`), revierte el detalle y retorna error. Si la variante no existe → mismo tratamiento.
+- [x] `database.js::recibir()` — Los PATCH de `pos_compras.estado` (RECIBIDA/RECIBIENDO) ahora verifican `.error`; en fallo se agregan a `data.advertencias[]` que la UI muestra como toast.
+- [x] `database.js::recibir()` — Decision documentada: `checkTodos` excluye soft-deleted a proposito (filas eliminadas ya no son parte de la orden).
+- [x] `compras.js::guardar()` — Proteccion de estado: en modo edicion, si el dropdown dice PENDIENTE pero hay items recibidos en DB, recalcula estado (todos RECIBIDO → RECIBIDA, algunos → RECIBIENDO) con toast informativo. Nueva variable `EDITANDO_ESTADO`.
+- [x] `compras.js::guardar()` — El loop de auto-recepcion (estado RECIBIDA) ahora cuenta errores de `recibir()` y muestra toast con la cantidad fallida.
+- [x] `compras.js::confirmarRecepcion()/onRecibirTodo()` — Muestran advertencias de `res.data.advertencias` cuando el estado de la orden no pudo actualizarse.
+- [x] Causa raiz diagnosticada con queries SQL en produccion: OC #63 quedo PENDIENTE con 7/7 items recibidos (Guardar posterior sobrescribio el estado); OC #64 tuvo recepcion fantasma de AL115-Rosa x5 (movimiento+stock fallaron silenciosamente, stock DB=12 vs fisico=17). Ajuste de datos ejecutado por el usuario (INSERT movimiento + UPDATE stock=17).
+- [x] `service-worker.js` — Cache bump `kubit-pos-20260825-01`.
+- [x] `tests/compartido/database.test.js` — 5 nuevos tests de `DB.comprasDetalle.recibir`: happy path total, parcial (RECIBIENDO), fallo movimiento (revertir), fallo stock (eliminar movimiento + revertir), sobre-recepcion rechazada.
+
+#### Modulo POS — Fases 30 a 41 (octubre 2026)
+Cada fase indica que cambio, los archivos y la version del cache. Commits entre parentesis.
+
+**Fase 30 — Anular venta devuelve el stock con movimiento (2026-10-16, `8be5018`, cache `kubit-pos-20261016-01`)**
+- [x] `database.js::ajustarStock()` — politica estricta: inserta el movimiento primero y actualiza el stock despues; si falla el stock, elimina el movimiento. Acepta `opts.referencia`.
+- [x] `database.js::ventas.anularConRevertir()` — solo CONFIRMADA/PENDIENTE; usa `devolucion_venta` (antes `entrada_anulacion`, que no existe en el CHECK, y nadie revisaba el error); si un producto falla deshace los anteriores y no anula; finanzas al final con `advertencias[]`.
+- [x] `ventas-historial.js::anularVenta()` — el boton "Anular Venta" usa `anularConRevertir()` (antes `DB.ventas.anular()` solo cambiaba el estado, sin devolver stock ni finanzas).
+- [x] `ventas.js` — mensajes claros tras editar (original no anulada / advertencias).
+- [x] `tests/compartido/database.test.js` — 6 tests nuevos. `npm test` → 116 passed.
+- [x] Las 9 anulaciones historicas no se corrigieron en inventario (ya se habian ajustado a mano).
+
+**Fase 31 — El stock solo cambia con movimiento (2026-10-16, `ade3642`, cache `-02`)**
+- [x] `productos.js` — al editar, el stock no se envia (campo de solo lectura con enlace a Inventario); al crear un producto o variante nace con stock 0 y el stock inicial se registra con `ajustarStock` como `ajuste_incremento`, motivo "Stock inicial" (si falla, aviso en rojo y queda en 0).
+- [x] `productos.html` — avisos junto al stock y bajo la tabla de variantes.
+- [x] `database.js::detalleActualizar()` — descarta `stock_actual`.
+- [x] Causa raiz: guardar la ficha reescribia `stock_actual` con el valor cargado al abrirla, sin movimiento.
+- [x] 3 tests nuevos. `npm test` → 119 passed.
+
+**Fase 32 — IVA 0% (exento) en la ficha de producto (2026-10-16, `9f883aa`, cache `-03`)**
+- [x] `productos.js` — `parseFloat(...) / 100 || 0.19` y `p.tasa_impuesto || 0.19` convertian el 0 en 19% al abrir y al guardar; ahora el 0 es valido y el valor por defecto es 0.
+- [x] Datos (SQL en produccion): los 56 productos que habian quedado en 19% pasaron a 0% (351 productos con `tasa_impuesto = 0`).
+
+**Seguridad — retiro de la llave `service_role` de `config.js` (2026-10-16, `8bde21d`, cache `-04`)**
+- [x] `apps/pos/js/config.js` — `supabaseServiceKey: ''`. Crear usuario y cambiar contrasena desde el POS ya no funcionan; se hacen en Supabase (Authentication > Users).
+- [ ] La revision de seguridad en detalle queda pendiente (ver 7.3).
+
+**Fase 33 — IVA 0% en Configuracion de la empresa (2026-10-18, `b9e1e67`, cache `-05`)**
+- [x] `configuracion.js` — `c.impuesto_default || '19'` mostraba 19 cuando el IVA guardado era 0; ahora respeta el 0. `configuracion.html` — la opcion 0% queda preseleccionada.
+
+**Fase 34 — Enlace "Tienda Virtual" dinamico (2026-10-18, `8e9efe7`, cache `-06`)**
+- [x] `database.js::normalizarUrlTienda()` y `cargarLinkTienda()` — usa la primera direccion si hay varias, agrega `https://` si falta, solo http/https, oculta el enlace si `store_url` esta vacio o es invalido y no cambia nada si falla la lectura. Las 18 paginas no se tocaron.
+
+**Fases 35-37 — Indicadores de inventario (2026-10-18, `73570b6`, cache `-07`)**
+- [x] `panel.js` y `reportes.js` — Valor Inventario PVP (`precio_venta * stock_actual`, solo stock positivo); se excluyen los productos `Digital`; Total SKU, Stock Bajo (mínimo del SKU) y Agotados (`<= 0`) con la misma regla en Panel y Reportes; si falla la lectura de digitales los indicadores muestran `---`.
+- [x] `reportes.js` — el valor se redondea a pesos (antes mostraba decimales).
+- [x] `panel.html` y `reportes.html` — etiquetas "Valor Inventario PVP" y "Total SKU".
+
+**Fase 38 — Buscar ordenes de compra por Notas (2026-10-18, `80b9f51`, cache `-08`)**
+- [x] `compras.js::filtrarYRender()` — tambien compara con `notas`. `compras.html` — el texto de ayuda dice "Buscar por orden, proveedor o notas...".
+
+**Fases 39-40 — Vender y editar sin dejar ventas a medias (2026-10-18, `d571547`, cache `-09`)**
+- [x] `ventas.js` — verifica que la original siga vigente antes de crear; deshace la venta nueva si falla anular la original o si falla el stock (`revertirVentaNueva()`); avisa si falla el acumulador mensual; "Limpiar Formulario" cancela la edicion.
+- [x] `ventas.html` — nuevo cuadro `#modal-alerta` (no se cierra solo).
+
+**Fase 41 — Orden del Historial de Ventas (2026-10-18, `d02ab83`, cache `-10`)**
+- [x] `database.js::ventas.listar()` — `orderBy: 'fecha_venta.desc,created_at'`.
+
+**Datos — Acumulador mensual (bug #3, 2026-10-18, sin cambios de codigo)**
+- [x] Se corrigieron en produccion las filas de `pos_finanzas_mensuales` de ago, sep y oct 2026 para que cuadren con `pos_ventas` (ver §5 y `specs/03-pos-spec.md` §3.6.2). Nov 2025 no se toca (ventas importadas desde CSV).
+
 ### 7.4 Próximo Paso Recomendado
 **Despues del deploy:** Integración con MercadoLibre para sincronizar productos y pedidos.
 
@@ -529,12 +652,15 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 
 ## 10. Producción — Seguridad de Credenciales (REQUISITO OBLIGATORIO)
 
-### 10.1 Regla #1: No exponer secrets en Git
-- `apps/pos/js/config.js` contiene `SUPABASE_URL` y `SUPABASE_ANON_KEY` reales de QA.
-- **En producción, este archivo DEBE estar en `.gitignore` y NO subirse a GitHub.**
-- Durante desarrollo se subió temporalmente para pruebas en servidor remoto. Antes del deploy a producción, la IA debe revertir esto.
+### 10.1 Regla #1: la llave service_role nunca va en el frontend (actualizado 2026-10-18)
+- `apps/pos/js/config.js` contiene `SUPABASE_URL` y `SUPABASE_ANON_KEY` (llave publica). **Va en el repositorio**: Vercel sirve el POS desde Git, asi que no se mueve a `.gitignore`.
+- **Nunca** debe llevar la llave `service_role` (acceso total a la base): `supabaseServiceKey` queda `''`. Las funciones administrativas (crear usuarios, cambiar contrasenas) se hacen en el panel de Supabase.
+- Cada ambiente (QA y produccion) tiene su propio `config.js`; no se copia de uno a otro.
+- **No ejecutar** `git rm --cached apps/pos/js/config.js`: el POS publicado perderia la conexion a la base.
 
 ### 10.2 Cómo manejar credenciales en producción
+
+> **Nota (2026-10-18):** las opciones A y B de abajo no aplican al despliegue actual (sitio estatico sin servidor propio); se conservan como referencia historica. Ver 10.1.
 
 **Opción A (recomendada): Variables de entorno en Vercel**
 1. Ir a [Vercel Dashboard](https://vercel.com) → Project Settings → Environment Variables
@@ -546,11 +672,11 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 2. Crear `apps/pos/js/config.js` con credenciales de producción
 3. Mantener el archivo fuera del repositorio de Git
 
-### 10.3 Checklist pre-producción (lo ejecuta la IA al hacer deploy)
-- [ ] `apps/pos/js/config.js` eliminado del índice de git (`git rm --cached apps/pos/js/config.js`)
-- [ ] `apps/pos/js/config.js` agregado a `.gitignore`
-- [ ] Credenciales de producción configuradas en Vercel o servidor
-- [ ] `config.ejemplo.js` actualizado con template de producción
+### 10.3 Checklist de credenciales (actualizado 2026-10-18)
+- [x] `apps/pos/js/config.js` solo con la URL y la llave `anon`; `supabaseServiceKey: ''` (commit `8bde21d`)
+- [x] No ejecutar `git rm --cached` sobre `config.js` (el POS perderia la conexion)
+- [x] `config.ejemplo.js` conserva textos de ejemplo, sin llaves reales
+- [ ] Revision de seguridad en detalle: pendiente
 
 ---
 
@@ -958,6 +1084,13 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 - **KPIs de Inventario separados de Operativos:** Los indicadores de inventario (Total Productos, Stock Bajo, Agotados, Valor Inventario) estan en la misma fila que los Operativos del dia pero conceptualmente separados. Comparten la misma fuente de datos (`DB.productos.listarConDetalle`) para minimizar queries.
 - **Sin filtro de canal en KPIs de inventario:** El stock y valor de inventario son conceptos absolutos del negocio, no atribuibles a un canal de venta. Aplicarles filtro de canal daria informacion erronea o incompleta.
 - **`estadisticasDelPeriodo` usa `api.get()` directo:** A diferencia de otros metodos que usan el helper `select()`, `estadisticasDelPeriodo` y `porMes` usan `api.get()` directamente con querystring construido manualmente. Esto es necesario porque los agregados PostgREST (`sum:total`, `sum:costos`) y la notacion de alias (`sum_total:sum:total`) no son compatibles con el query builder de `database.js`.
+- **Grafico "Ingresos vs Gastos" (grouped bar):** Nueva card en panel.html entre Comparativa Anual y Tendencia de Ventas. Muestra 3 barras agrupadas por mes: Ingresos (esmeralda), Gastos+Costos (rosa), Utilidad Neta (sky). Los datos vienen de `pos_finanzas_mensuales` con suplemento en vivo para el mes actual. Selector de ano independiente (`#ivg-anio`) en el header de la card, mismo patron que Ventas Mensuales.
+- **Calculo de Gastos+Costos en Ingresos vs Gastos:** `gastos = costo_mercaderia_vendida + gastos_operativos_total + costos_comision_total + compras_total + otros_gastos`. `ingresos = ventas_brutas || ventas_netas`. `utilidad = ingresos - gastos`. Para el mes actual se usan `DB.gastos.totalDelMes()`, `DB.compras.totalDelMes()` y `DB.ventas.estadisticasDelPeriodo()`.
+- **No usar `.textContent` en `<select>`:** Asignar `.textContent` a un elemento `<select>` reemplaza todos los `<option>` hijos por un nodo de texto. Siempre manipular `<option>` via `document.createElement('option')` + `appendChild()`. Bug detectado en Fase 25 donde una linea residual de cuando `#ivg-anio` era `<span>` borraba las opciones del dropdown.
+- **Precacheados en SW: `panel.html` y `js/paginas/panel.js`:** Ambos archivos estaban ausentes del array ASSETS en `service-worker.js`, lo que causaba que el SW sirviera versiones viejas cacheadas en runtime. Se agregaron al precache junto con el bump de version.
+- **Rentabilidad TOTAL con 4 queries paralelas:** `obtenerTotalesHistoricos()` ejecuta 4 queries via `Promise.all` en un solo metodo: ventas (finanzas_mensuales), CMV-gastos (3 categorias), CMV-compras (pos_compras excluyendo ANULADA), Gastos+Comisiones (todas las categorias excepto 6). Ventas Brutas no es el `SUM(ventas_brutas)` real sino `SUM(ventas_netas)` porque en la migracion V0→V1 los valores reales de ventas se almacenaron en `ventas_netas`. `ventas_brutas` en DB puede ser 0 en periodos historicos (Sep 2023-Oct 2025).
+- **CMV se compone de 2 fuentes complementarias:** Pago Proveedores + Fletes (gastos_detalle, datos V1 historicos 2023-2025) y `pos_compras.total` (datos V2 operativos 2026+). No hay solapamiento porque los rangos de fecha son distintos. `pos_compras` excluye `estado = 'ANULADA'` para evitar incluir ordenes canceladas.
+- **Gastos+Comisiones = todo lo que no es CMV ni Inversion Inicial:** Se usa `categoria_id=not.in.(6 UUIDs)` en PostgREST. Las 6 categorias excluidas son: Pago Proveedores, Flete China-Colombia, Flete Bog-Med (CMV) + Membresia Club Importadores, TiendaVirtual, Insumos Tecnologicos (Inversion Inicial). Las otras 17 categorias se consideran Gastos Operativos + Comisiones + Marketing + Devoluciones.
 
 ---
 
@@ -1030,8 +1163,8 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 | Lightbox touch swipe | `touchstart`/`touchend` delta >50px, `passive: true` |
 | Lightbox keyboard | `keydown` Escape/←/→, cleanup via MutationObserver |
 | Lightbox cursor | `cursor-pointer` agregado via JS solo si mas de 1 imagen |
-| Void + Recreate (Editar Venta) | `ventas.js::cargarEdicion()`, `ventas-historial.js::editarVenta()`, `database.js::anularConRevertir()`. Crear nueva venta PRIMERO, anular original solo si exito. sessionStorage `kubit_editar_venta` + query param `?editar=ID`. |
-| anularConRevertir | `database.js::ventas.anularConRevertir(id, opts)`. Revierte stock (entrada_anulacion), finanzas mensuales (valores negativos), marca ANULADA. |
+| Void + Recreate (Editar Venta) | `ventas.js::cargarEdicion()`, `ventas-historial.js::editarVenta()`, `database.js::anularConRevertir()`. Crear nueva venta PRIMERO, anular original solo si exito. sessionStorage `kubit_editar_venta` + query param `?editar=ID`. Fases 39-40: verifica que la original siga vigente, deshace la nueva si falla anular la original, `#modal-alerta` persistente. |
+| anularConRevertir | `database.js::ventas.anularConRevertir(id, opts)`. Solo CONFIRMADA/PENDIENTE. Devuelve stock con `devolucion_venta` (NO existe `entrada_anulacion`), revierte finanzas mensuales (valores negativos), marca ANULADA solo si el stock quedo bien. Retorna `data.advertencias[]`. |
 | cargarEdicion | `ventas.js::cargarEdicion(v)`. Puebla formulario ventas.html desde objeto venta completo: cliente, fecha, metodo_pago, referencia, vendedor, canal, costos, descuento global, carrito con items. |
 | Store SW service worker | `apps/store/service-worker.js`, ES_LOCAL bypass, cache outletshop-YYYYMMDD-NN, postMessage auto-reload |
 | Store SW registration | `navigator.serviceWorker.register`, 8 paginas Store |
@@ -1053,7 +1186,7 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 | Herramientas module | `herramientas.html`, `herramientas/`, `js/herramientas/` |
 | Renombrar Archivos tool | `renombrar-archivos.html`, `renombrar-archivos.js`, File System Access API, `showDirectoryPicker` |
 | Panel Dashboard | `panel.html`, `panel.js`, KPIs del Mes (finanzas mensuales), KPIs Operativos (ventas hoy/stock bajo) |
-| Store URL desde DB | `configuracion.html#campo-store-url`, `cargarLinkTienda()` en `database.js`, `#link-tienda-virtual` en sidebar |
+| Store URL desde DB | `configuracion.html#campo-store-url`, `cargarLinkTienda()` y `normalizarUrlTienda()` en `database.js`, `#link-tienda-virtual` en sidebar. Se oculta si `store_url` esta vacio o es invalido (Fase 34). |
 | Top 5 productos | `database.js::ventas.topProductos(limite)`, agregacion por `pos_ventas_detalle` del mes actual |
 | Sidebar compartido | `js/compartido/sidebar.js`, `toggleSidebar()`, paginas no-CRUD |
 | Action buttons patron | `#action-bar`, natural flow, `flex flex-col sm:flex-row gap-3`, show/hide contextual |
@@ -1078,7 +1211,7 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 | Filtro canal | `#filtro-canal`, `DB.ventas.estadisticasDelPeriodo()`, `getFiltros()` |
 | Grafico ventas mensuales | `cargarVentasMensuales()`, `DB.ventas.porMes()`, `#ventasMensualesChart`, Chart.js bar |
 | Grafico comparativa anual | `cargarComparativaAnual()`, `#comparativaChart`, Chart.js grouped bar |
-| Valor inventario KPI | `#kpi-inv-valor`, `stock_actual * precio_venta` en `cargarKpisOperativos()` |
+| Valor inventario KPI | `#kpi-inv-valor`, Valor Inventario PVP = `precio_venta * stock_actual` (solo stock > 0, sin productos Digital) en `panel.js::cargarKpisOperativos()` y `reportes.js::cargarInventario()` (Fases 35-37) |
 | Productos agotados KPI | `#kpi-inv-agotados`, `stock_actual <= 0` |
 | Ticket promedio periodo | `#kpi-mes-ticket`, nuevo 8vo KPI financiero |
 | Filtros reactivos | `bindearFiltros()`, `change` event → `cargarTodo()`, recarga completa del dashboard |
@@ -1096,14 +1229,64 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 | Zona horaria Colombia | `ALTER DATABASE postgres SET timezone = 'America/Bogota'`, `13-migrate-timezone.sql`, America/Bogota UTC-5 |
 | `hoyColombia()` | Funcion utilitaria en `database.js`, devuelve YYYY-MM-DD en hora Colombia |
 | Gastos en vivo desde detalle | `DB.gastos.totalDelMes()`, `pos_gastos_mensuales_detalle`, suma `monto` en vivo, excluye soft-delete |
-| Valor Inventario KPI | `cargarKpisOperativos()`, `precio_compra > 0 ? precio_compra : precio_venta / 1.30`, sin dedup de variantes |
+| Valor Inventario KPI | `cargarKpisOperativos()`, Valor Inventario PVP (Fase 35): ya NO usa `precio_compra` ni `precio_venta / 1.30`; excluye productos Digital |
 | Productos Vendidos Hoy | `DB.ventas.productosVendidosHoy()`, `kpi-op-prod-hoy`, join embed `pos_ventas -> pos_ventas_detalle` |
 | Datos historicos en ventas_netas | `pos_finanzas_mensuales.ventas_netas`, fallback `ventas_brutas \|\| ventas_netas \|\| 0` en `porMes()` y `cargarKpisMes()` |
 | Rango dropdowns 2023 | `poblarSelectores()`, `for (a = anioAct + 1; a >= 2023; a--)` en `panel.js` |
 | Tendencia de Ventas | `cargarTendencia()`, `DB.ventas.todosLosAnios()`, Chart.js multi-year line chart, tabla resumen anual |
 | todosLosAnios | `DB.ventas.todosLosAnios()`, `pos_finanzas_mensuales`, `ventas_brutas \|\| ventas_netas` |
+| Ingresos vs Gastos chart | `cargarIngresosVsGastos()`, `chartIngresosVsGastos`, `DB.finanzasMensuales.obtenerIngresosVsGastos()`, grouped bar chart con 3 datasets |
+| Selector ivg-anio | `#ivg-anio`, `<select>` en header de card Ingresos vs Gastos, populado via `poblarSelectores()`, independiente de `chart-anio` |
+| obtenerIngresosVsGastos | `DB.finanzasMensuales.obtenerIngresosVsGastos(anio)`, query `pos_finanzas_mensuales`, suplemento mes actual en vivo |
+| No usar textContent en select | Bug Fase 25: `.textContent` en `<select>` destruye `<option>` hijos. Usar `createElement('option')` + `appendChild()` |
+| Rentabilidad TOTAL | `obtenerTotalesHistoricos()`, `cargarKpisTotales()`, 12 KPIs, 3 filas `grid-cols-2 sm:grid-cols-4` |
+| 3ra fila Rentabilidad | Inversion Inicial, % Gastos/Ventas, Relacion CMV/Ventas, Break-even (meses). Derivados sin nuevas queries. `meses_operacion` = `resVentas.data.length` |
+| Ventas Brutas historicas | `SUM(ventas_netas)` de `pos_finanzas_mensuales`, NO `ventas_brutas` (herencia migracion V0→V1) |
+| CMV (Costo Ventas) formula | `SUM(monto) WHERE categoria IN (Pago Proveedores, Flete China-Colombia, Flete Bog-Med)` + `SUM(pos_compras.total) WHERE estado != 'ANULADA'` |
+| Gastos+Comisiones formula | `SUM(monto) WHERE categoria NOT IN (6 categorias de CMV + Inversion Inicial)` |
+| Inversion Inicial | 3 categorias: Membresia Club Importadores, TiendaVirtual, Insumos Tecnologicos. Se usa solo para calcular ROI, NO se resta de Utilidad Neta |
+| Pago Proveedores V1 vs pos_compras V2 | Complementarios. V1: gastos_detalle (2023-2025, notas "Carga CSV"). V2: pos_compras (2026+, exclude ANULADA). No se solapan |
+| Cadena de Rentabilidad | Ventas Brutas → CMV → Utilidad Bruta → % Margen Bruto → Gastos+Comisiones → Utilidad Neta → % Margen Neto → ROI |
+| 4 queries paralelas | `Promise.all` en `obtenerTotalesHistoricos()`: ventas, cmv_gastos, cmv_compras, gastos_comisiones |
+| Recepcion de Compras auto | `compras.js::guardar()` detecta estado RECIBIDA y auto-ejecuta `DB.comprasDetalle.recibir()` por item. No usar `campo-estado` + PATCH directo. |
+| incluirEliminados en recibir | `database.js::recibir()` usa `incluirEliminados: true` para encontrar variantes soft-deleted. Si se omite, `select()` helper agrega `deleted_at=is.null` y el stock update se salta. |
+| cacheClear post-recepcion | `database.js::recibir()` ahora hace `_cacheClear('productos')` para que el stock actualizado se refleje inmediatamente en el POS. |
+| Bug: estado RECIBIDA sin stock update | Si una orden de compra tiene `estado=RECIBIDA` pero `cantidad_recibida=0`, es porque se marco via dropdown saltando `recibir()`. Solucion: ejecutar "Recibir Todo" en la UI o editar y guardar con RECIBIDA (el fix auto-ejecuta recibir). |
+| Smart Stats Filter | `inventario.js::FILTRO_RESUMEN`, `aplicarFiltroResumen()`, `actualizarFiltroUI()`, `data-stat`, `#card-stat-*`, `#filtro-activo`. Cards de resumen clickeables filtran tabla de Existencias Actuales con AND logico + buscador. Todo client-side sobre `PRODUCTOS_DETALLE`. |
+| Filtro interactivo inventario | `inventario.html` cards con `data-stat="total|con_stock|stock_bajo|agotados"`, `cursor-pointer`, `ring-2` al activarse. Pill `#filtro-activo` con label y boton `✕` para limpiar. |
+| Recepcion de Compras auto | `compras.js::guardar()` detecta estado RECIBIDA y auto-ejecuta `DB.comprasDetalle.recibir()` por item. No usar `campo-estado` + PATCH directo. |
+| incluirEliminados en recibir | `database.js::recibir()` usa `incluirEliminados: true` para encontrar variantes soft-deleted. Si se omite, `select()` helper agrega `deleted_at=is.null` y el stock update se salta. |
+| cacheClear post-recepcion | `database.js::recibir()` ahora hace `_cacheClear('productos')` para que el stock actualizado se refleje inmediatamente en el POS. |
+| Bug: estado RECIBIDA sin stock update | Si una orden de compra tiene `estado=RECIBIDA` pero `cantidad_recibida=0`, es porque se marco via dropdown saltando `recibir()`. Solucion: ejecutar "Recibir Todo" en la UI o editar y guardar con RECIBIDA (el fix auto-ejecuta recibir). |
+| Politica estricta recepcion | `database.js::recibir()` revierte detalle si movimiento o stock fallan. Nunca queda item RECIBIDO sin inventario. Advertencias via `res.data.advertencias[]`. |
+| Proteccion estado guardar compras | `compras.js::guardar()` recalcula estado desde detalles reales si dropdown dice PENDIENTE. Variable `EDITANDO_ESTADO`. Bloquea retroceso RECIBIENDO/RECIBIDA → PENDIENTE. |
+| Recepcion fantasma | Sintoma: detalle con `cantidad_recibida > 0` sin movimiento en `pos_movimientos_inventario`. Diagnostico: comparar `sum(cantidad_recibida)` vs movimientos `entrada_compra` por referencia `OC-<numero>`. |
+| ajustarStock politica estricta | `database.js::productos.ajustarStock(detalleId, cantidad, tipo, motivo, opts)`: inserta el movimiento primero y luego actualiza el stock; si falla el stock borra el movimiento. `opts.referencia` y `opts.usuarioId`. |
+| El stock solo cambia con movimientos | `detalleActualizar()` descarta `stock_actual`; `productos.js` no envia stock al editar (campo de solo lectura); stock inicial = `ajuste_incremento` motivo "Stock inicial" (Fases 30-31). |
+| devolucion_venta | Tipo de movimiento (+) usado al anular una venta; `referencia` = numero de venta, motivo `Anulacion venta #<numero>`. |
+| revertirVentaNueva | `ventas.js::revertirVentaNueva()`: marca la venta ANULADA y despues devuelve el stock ya descontado. |
+| modal-alerta | `ventas.html#modal-alerta` (`#alerta-titulo`, `#alerta-mensaje`, `#btn-alerta-cerrar`), `mostrarAlertaVenta()`: aviso que NO se cierra solo. |
+| Limpiar Formulario cancela la edicion | `ventas.js`: el handler de `#btn-limpiar` pone `VENTA_EDITANDO_ID = null` (Fase 40). |
+| Orden del historial de ventas | `DB.ventas.listar()` con `orderBy: 'fecha_venta.desc,created_at'` (Fase 41). |
+| Total SKU / Stock Bajo / Agotados | Panel y Reportes: SKU = variante; Stock Bajo = `stock_actual > 0` y `<= stock_min` (2 por defecto); Agotados = `<= 0`; sin productos Digital (Fases 36-37). |
+| Productos Digital excluidos | `DB.select('pos_productos', { select: 'id', filters: [{ col: 'tipo_producto', val: 'Digital' }] })` en `panel.js` y `reportes.js`; si falla, muestran `---`. |
+| Conciliacion del acumulador mensual | Consulta en `specs/03-pos-spec.md` §3.6.2; debe devolver solo nov 2025 (ventas importadas desde CSV). |
+| IVA 0% (exento) | `productos.js` y `configuracion.js` respetan el 0; no usar `\|\|` con valor por defecto 0.19 (Fases 32-33). |
+| Buscar orden de compra por Notas | `compras.js::filtrarYRender()` incluye `c.notas` (Fase 38). |
+| service_role fuera del frontend | `apps/pos/js/config.js` con `supabaseServiceKey: ''` (commit `8bde21d`); crear usuario y cambiar contrasena se hacen en Supabase. |
 
 ## 13. Registro de Cambios (continuacion)
+
+### 2026-07-23 — Fix Recepcion de Compras (Fase 27)
+
+| Archivo | Cambio |
+|---|---|
+| `apps/pos/js/paginas/compras.js` | `guardar()` ahora detecta cuando `estado === 'RECIBIDA'` y auto-ejecuta `DB.comprasDetalle.recibir()` para cada item pendiente. Evita que el dropdown bypasse el flujo de recepcion. |
+| `apps/pos/js/compartido/database.js` | `recibir()` agregado `incluirEliminados: true` en query a `pos_productos_detalle` para que stock update no falle si la variante esta soft-deleted. |
+| `apps/pos/js/compartido/database.js` | `recibir()` agregado `_cacheClear('productos')` antes del return para que el stock actualizado se refleje inmediatamente. |
+| `AGENTS.md` | Seccion 5: decision Recepcion solo via recibir(). Seccion 7.2: Fase 27. Seccion 11: 4 nuevas keywords. |
+| `specs/03-pos-spec.md` | Nueva subseccion 3.4.3 documentando flujo de recepcion y bugs. |
+| `npm test` | 105 passed, 0 failures |
 
 ### 2026-06-26 — Store Variant Name Fix + Cart Variant Display (Fase 22)
 
@@ -1304,3 +1487,81 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 | `apps/pos/panel.html` | Nueva card "Tendencia de Ventas" con canvas 300px + contenedor tabla resumen. Reordenada entre Comparativa+Top5 y Accesos Rapidos. |
 | `AGENTS.md` | Seccion 5: 3 nuevas decisiones (datos historicos ventas_netas, tendencia multi-year, rango dropdowns 2023). Seccion 7.2: Fase 24. Seccion 11: 4 nuevas keywords. |
 | `npm test` | 105 passed, 0 failures |
+
+### 2026-07-13 — Grafico Ingresos vs Gastos + Fix SW Cache + Bug textContent en select (Fase 25)
+
+| Archivo | Cambio |
+|---|---|
+| `apps/pos/js/compartido/database.js` | Nuevo metodo `DB.finanzasMensuales.obtenerIngresosVsGastos(anio)`: query `pos_finanzas_mensuales` con suplemento en vivo para mes actual. Retorna 12 meses con `ingresos`, `gastos`, `utilidad`. |
+| `apps/pos/panel.html` | Nueva card "Ingresos vs Gastos" entre Comparativa Anual y Tendencia de Ventas. Canvas `#ingresosVsGastosChart` 280px. Selector `<select id="ivg-anio">` independiente. |
+| `apps/pos/js/paginas/panel.js` | Nueva variable `chartIngresosVsGastos`. Nueva funcion `cargarIngresosVsGastos()`: Chart.js grouped bar con 3 datasets (Ingresos esmeralda, Gastos+Costos rosa, Utilidad Neta sky). `ivg-anio` agregado a `poblarSelectores()`. Listener independiente en `bindearFiltros()`. Integrado en `cargarTodo()` via `Promise.all`. Listener `chart-anio` actualizado. |
+| `apps/pos/js/paginas/panel.js` | Fix critico: eliminada linea `labelAnio.textContent = anio` que borraba los `<option>` del `<select id="ivg-anio">` (reliquia de cuando era `<span>`). |
+| `apps/pos/service-worker.js` | Cache version bumped: `kubit-pos-20260619-01` → `kubit-pos-20260713-01`. `panel.html` y `js/paginas/panel.js` agregados al precache ASSETS. |
+| `AGENTS.md` | Seccion 5: 4 nuevas decisiones (grafico IVG, calculo gastos+costos, textContent en select, SW precache). Seccion 7.2: Fase 25. Seccion 11: 4 nuevas keywords. |
+| `npm test` | 105 passed, 0 failures |
+
+### 2026-07-26 — Smart Stats Filter (Fase 28)
+
+| Archivo | Cambio |
+|---|---|
+| `apps/pos/inventario.html` | Cards de resumen con `data-stat`, `cursor-pointer`, `hover:ring-2`, `id="card-stat-*"`. Nuevo `#filtro-activo` con pill y boton `✕` entre buscador y tabla. |
+| `apps/pos/js/paginas/inventario.js` | `FILTRO_RESUMEN`, `obtenerListaFiltrada()` con AND logico, `aplicarFiltroResumen()` (toggle + scroll), `actualizarFiltroUI()` (ring-2 + pill), `_resumenHandlersAttached` flag, `#btn-limpiar-filtro` handler. |
+| `specs/03-pos-spec.md` | Nueva subseccion 3.3.4 documentando Smart Stats Filter. |
+| `AGENTS.md` | Seccion 5: decision de diseno Smart Stats Filter. Seccion 7.2: Fase 28. Seccion 11: 2 nuevas keywords. |
+| `npm test` | 105 passed, 0 failures |
+
+### 2026-07-20 — Rentabilidad TOTAL (Fase 26)
+
+| Archivo | Cambio |
+|---|---|
+| `apps/pos/panel.html` | Nuevo bloque "Rentabilidad TOTAL" con 12 KPIs en 3 filas `grid-cols-2 sm:grid-cols-4`: Fila 1 (Ventas Brutas, CMV, Utilidad Bruta, % Margen Bruto), Fila 2 (Gastos+Comisiones, Utilidad Neta, % Margen Neto, ROI), Fila 3 (Inversion Inicial, % Gastos/Ventas, Relacion CMV/Ventas, Break-even). IDs `kpi-total-*`. Insertado ANTES de Accesos Rapidos. |
+| `apps/pos/js/compartido/database.js` | Nuevo metodo `obtenerTotalesHistoricos()`: 5 queries paralelas via `Promise.all`. Ventas: SUM(ventas_netas) de finanzas_mensuales. CMV-gastos: SUM(monto) WHERE categoria IN (3 CMV). CMV-compras: SUM(total) FROM pos_compras WHERE estado != 'ANULADA'. Gastos+Comisiones: SUM(monto) WHERE categoria NOT IN (6: 3 CMV + 3 Inversion Inicial). Inversion Inicial: SUM(monto) WHERE categoria IN (3 inversion). Retorna `meses_operacion` desde `resVentas.data.length`. |
+| `apps/pos/js/paginas/panel.js` | Nueva funcion `cargarKpisTotales()`: calcula Utilidad Bruta, % Margen Bruto, Utilidad Neta, % Margen Neto, ROI, % Gastos/Ventas, Relacion CMV/Ventas, Break-even. Puebla los 12 KPIs. Integrada en `cargarTodo()` via `Promise.all`. Break-even muestra `---` si Utilidad Neta ≤ 0. |
+| `AGENTS.md` | Seccion 5: 3 nuevas decisiones (Rentabilidad TOTAL 4 queries, CMV 2 fuentes, Gastos+Comisiones exclusion). Seccion 7.2: Fase 26. Seccion 11: 9 nuevas keywords. |
+| `specs/03-pos-spec.md` | Nueva subseccion 9.10 documentando Rentabilidad TOTAL (diseno, formula, metodos DB). Subseccion 9.10.6 para 3ra fila de indicadores complementarios. |
+| `npm test` | 105 passed, 0 failures |
+
+### 2026-08-25 — Politica Estricta de Recepcion + Proteccion de Estado (Fase 29)
+
+**Diagnostico en produccion:** OC #63 quedo PENDIENTE con 7/7 items RECIBIDO (un Guardar posterior sobrescribio el estado desde el dropdown desactualizado) y OC #64 tuvo recepcion fantasma de AL115-Rosa x5 (el detalle quedo RECIBIDO pero movimiento de inventario + stock fallaron silenciosamente; stock DB=12 vs fisico=17). Diagnostico realizado con queries SQL comparando `cantidad_recibida` vs movimientos `entrada_compra` por referencia.
+
+| Archivo | Cambio |
+|---|---|
+| `apps/pos/js/compartido/database.js` | `recibir()` politica estricta: fallo del INSERT del movimiento → revierte PATCH del detalle y retorna error. Fallo del update de stock → elimina movimiento huerfano (`api.delete`) + revierte detalle + retorna error. Variante inexistente → mismo tratamiento. Los PATCH de `pos_compras.estado` verifican `.error` y agregan `advertencias[]` a la respuesta. `checkTodos` conserva filtro default soft-delete con decision documentada. Retorno incluye `data.advertencias[]`. |
+| `apps/pos/js/paginas/compras.js` | `guardar()` proteccion de estado: recalcula estado desde detalles reales si dropdown dice PENDIENTE y hay items recibidos (todos → RECIBIDA, algunos → RECIBIENDO) con toast. Nueva variable `EDITANDO_ESTADO`. Auto-recepcion cuenta errores y muestra toast. `confirmarRecepcion()/onRecibirTodo()` muestran `res.data.advertencias`. |
+| `apps/pos/service-worker.js` | Cache bump `kubit-pos-20260825-01`. |
+| `tests/compartido/database.test.js` | 5 nuevos tests de `DB.comprasDetalle.recibir`: happy path total, parcial (RECIBIENDO), fallo movimiento (revertir), fallo stock (eliminar movimiento + revertir), sobre-recepcion rechazada. |
+| `specs/03-pos-spec.md` | Nueva subseccion 3.4.4 documentando Politica Estricta de Recepcion (problema, soluciones, decision checkTodos). |
+| `AGENTS.md` | Seccion 5: 3 nuevas decisiones. Seccion 7.2: Fase 29. Seccion 11: 8 nuevas keywords. Este changelog. |
+| **Ajuste de datos (SQL ejecutado por el usuario)** | OC #63: UPDATE estado='RECIBIDA' (con guard EXISTS). AL115-Rosa: INSERT movimiento entrada_compra x5 ref 'OC-64' + UPDATE `stock_actual=17` en variante `31492c44-cdf2-4c88-991b-511f8126bb7a`. Auditoria global de las ordenes 61-64 confirmo que fue la unica discrepancia. |
+| `npm test` | 110 passed, 0 failures (105 → 110, +5 tests recibir) |
+
+### 2026-10-16 — Fases 30, 31 y 32 + retiro de service_role
+
+| Archivo | Cambio |
+|---|---|
+| `apps/pos/js/compartido/database.js` | `ajustarStock()` con politica estricta (movimiento primero, stock despues; si falla el stock borra el movimiento). `anularConRevertir()` con `devolucion_venta`, rollback de lo aplicado y `advertencias[]`. `detalleActualizar()` descarta `stock_actual`. |
+| `apps/pos/js/paginas/ventas-historial.js` | `anularVenta()` usa `anularConRevertir()` (antes solo cambiaba el estado). |
+| `apps/pos/js/paginas/ventas.js` | Mensajes claros tras editar una venta. |
+| `apps/pos/js/paginas/productos.js` y `apps/pos/productos.html` | Stock de solo lectura al editar; stock inicial como movimiento `ajuste_incremento`; el IVA 0% se respeta al abrir y al guardar. |
+| `apps/pos/js/config.js` | `supabaseServiceKey: ''` (commit `8bde21d`). |
+| `apps/pos/service-worker.js` | Cache `kubit-pos-20261016-01` a `-04`. |
+| `tests/compartido/database.test.js` | 9 tests nuevos (6 en la Fase 30 y 3 en la Fase 31). |
+| **SQL (ejecutado por el usuario)** | 56 productos con IVA 19% pasados a 0%. |
+| `AGENTS.md` y `specs/03-pos-spec.md` | Documentacion de estas fases (ver el changelog del 2026-10-18). |
+| `npm test` | 119 passed, 0 failures (110 → 116 → 119) |
+
+### 2026-10-18 — Fases 33 a 41 + acumulador mensual
+
+| Archivo | Cambio |
+|---|---|
+| `apps/pos/js/paginas/configuracion.js` y `apps/pos/configuracion.html` | Fase 33: el IVA 0% se respeta; la opcion 0% queda preseleccionada. |
+| `apps/pos/js/compartido/database.js` | Fase 34: `normalizarUrlTienda()` y `cargarLinkTienda()` (oculta el enlace si esta vacio o es invalido). Fase 41: `ventas.listar()` ordena por `fecha_venta.desc,created_at`. |
+| `apps/pos/js/paginas/panel.js`, `reportes.js`, `panel.html` y `reportes.html` | Fases 35-37: Valor Inventario PVP, productos digitales excluidos, Total SKU, Stock Bajo y Agotados con la misma regla, valor redondeado a pesos. |
+| `apps/pos/js/paginas/compras.js` y `apps/pos/compras.html` | Fase 38: el buscador de ordenes tambien busca por Notas. |
+| `apps/pos/js/paginas/ventas.js` y `apps/pos/ventas.html` | Fases 39-40: verifica la venta original antes de editar, deshace la venta nueva si algo falla, cuadro `#modal-alerta`, "Limpiar Formulario" cancela la edicion. |
+| `apps/pos/service-worker.js` | Cache `kubit-pos-20261016-05` a `-10` (las fases de este dia reutilizaron el prefijo de fecha 20261016). |
+| **SQL (ejecutado por el usuario)** | Acumulador mensual: se corrigieron las filas de ago, sep y oct 2026 de `pos_finanzas_mensuales`; respaldo CSV de las filas antiguas guardado fuera de los repositorios. |
+| `AGENTS.md` | Seccion 5: reglas nuevas. Seccion 7.2: Fases 30 a 41. Seccion 7.3: pendientes. Seccion 10: corregida (config.js va en el repositorio, sin `service_role`). Seccion 11: keywords. Este changelog. |
+| `specs/03-pos-spec.md` | Subsecciones nuevas 3.1.4, 3.1.5, 3.4.5, 3.6.2 y 3.7.3; correcciones en 3.1.1, 3.3.2, 3.3.3, 3.3.4, 4.1.1, 9.4 y 12. |
+| `npm test` | 119 passed, 0 failures |
