@@ -485,7 +485,8 @@
     COMPRAS_FILTRADAS = COMPRAS.filter(function (c) {
       var ord = String(c.numero_orden || '');
       var prov = (c.proveedor ? c.proveedor.razon_social : '') || '';
-      var matchesText = !q || ord.includes(q) || prov.toLowerCase().includes(q);
+      var notas = String(c.notas || '').toLowerCase(); // Fase 38: tambien se busca por Notas (ej. ID de la plataforma)
+      var matchesText = !q || ord.includes(q) || prov.toLowerCase().includes(q) || notas.includes(q);
       var matchesEstado = !estadoFiltro || c.estado === estadoFiltro;
       var matchesProveedor = !proveedorFiltro || c.proveedor_id === proveedorFiltro;
       return matchesText && matchesEstado && matchesProveedor;
