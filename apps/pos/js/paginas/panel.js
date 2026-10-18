@@ -168,39 +168,42 @@
   }
 
   async function cargarKpisOperativos() {
-    var [estHoy, resProductos, prodHoy] = await Promise.all([
+    var [estHoy, resProductos, prodHoy, resDigitales] = await Promise.all([
       DB.ventas.estadisticasHoy(),
       DB.productos.listarConDetalle({ skipCache: true }),
-      DB.ventas.productosVendidosHoy()
+      DB.ventas.productosVendidosHoy(),
+      // Fase 35: los productos digitales no son mercancia fisica y se excluyen de los indicadores de inventario
+      DB.select('pos_productos', { select: 'id', filters: [{ col: 'tipo_producto', val: 'Digital' }] })
     ]);
 
     $('kpi-op-ventas-hoy').textContent = estHoy.count || 0;
     $('kpi-op-total-hoy').textContent = formatCOP(estHoy.total || 0);
     $('kpi-op-ticket-prom').textContent = formatCOP(estHoy.promedio || 0);
 
-    var totalProductos = 0, stockBajo = 0, agotados = 0, valorInventario = 0;
-    var vistos = {};
+    var totalSku = 0, stockBajo = 0, agotados = 0, valorInventario = 0;
+    var idsDigital = {};
+    (resDigitales.data || []).forEach(function (p) { idsDigital[p.id] = true; });
     if (resProductos.data) {
       resProductos.data.forEach(function (d) {
-        if (!vistos[d.producto_id]) {
-          vistos[d.producto_id] = true;
-          totalProductos++;
-        }
+        if (idsDigital[d.producto_id]) return; // Fase 35: sin productos digitales
+        totalSku++; // Fase 37: el total cuenta SKU (cada variante), igual que Stock Bajo y Agotados
         var stock = d.stock_actual != null ? d.stock_actual : 0;
-        var costo = (d.precio_compra > 0) ? d.precio_compra : ((d.precio_venta || 0) / 1.30);
         if (stock <= 0) {
           agotados++;
         } else if (stock <= (d.stock_min || 2)) {
           stockBajo++;
         }
-        valorInventario += stock * costo;
+        // Fase 35: Valor Inventario PVP = precio de venta x unidades (solo stock positivo)
+        if (stock > 0) valorInventario += stock * (Number(d.precio_venta) || 0);
       });
     }
 
-    $('kpi-inv-total').textContent = totalProductos;
-    $('kpi-inv-stock-bajo').textContent = stockBajo;
-    $('kpi-inv-agotados').textContent = agotados;
-    $('kpi-inv-valor').textContent = formatCOP(valorInventario);
+    // Si no se pudo leer la lista de digitales, no se muestran numeros que podrian ser incorrectos
+    var sinDigitales = !!resDigitales.error;
+    $('kpi-inv-total').textContent = sinDigitales ? '---' : totalSku;
+    $('kpi-inv-stock-bajo').textContent = sinDigitales ? '---' : stockBajo;
+    $('kpi-inv-agotados').textContent = sinDigitales ? '---' : agotados;
+    $('kpi-inv-valor').textContent = sinDigitales ? '---' : formatCOP(valorInventario);
 
     $('kpi-op-prod-hoy').textContent = prodHoy;
   }

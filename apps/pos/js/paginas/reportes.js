@@ -92,10 +92,16 @@
   }
 
   async function cargarInventario() {
-    var res = await DB.productos.listarConDetalle();
+    var [res, resDigitales] = await Promise.all([
+      DB.productos.listarConDetalle(),
+      // Fase 36: los productos digitales no son mercancia fisica y se excluyen del inventario
+      DB.select('pos_productos', { select: 'id', filters: [{ col: 'tipo_producto', val: 'Digital' }] })
+    ]);
     if (res.error || !res.data) return;
 
-    var datos = res.data;
+    var idsDigital = {};
+    (resDigitales.data || []).forEach(function (p) { idsDigital[p.id] = true; });
+    var datos = res.data.filter(function (d) { return !idsDigital[d.producto_id]; });
     var totalItems = datos.length;
     var stockBajo = 0;
     var sinStock = 0;
@@ -105,17 +111,21 @@
     datos.forEach(function (d) {
       var stock = parseInt(d.stock_actual) || 0;
       var pv = parseFloat(d.precio_venta) || 0;
-      if (stock > 0 && stock <= 10) { stockBajo++; alertas.push(d); }
-      if (stock === 0) { sinStock++; alertas.push(d); }
-      valorTotal += stock * pv;
+      // Fase 37: misma regla que el Panel: agotado = stock <= 0; stock bajo = stock <= minimo del SKU (2 si no tiene)
+      var minimo = d.stock_min || 2;
+      if (stock <= 0) { sinStock++; alertas.push(d); }
+      else if (stock <= minimo) { stockBajo++; alertas.push(d); }
+      if (stock > 0) valorTotal += stock * pv; // Fase 36: Valor Inventario PVP (solo stock positivo)
     });
 
     var formatoCOP = window.formatCOP || function (val) { return '$' + Number(val).toLocaleString('es-CO'); };
 
-    $('inv-total').textContent = totalItems;
-    $('inv-stock-bajo').textContent = stockBajo;
-    $('inv-sin-stock').textContent = sinStock;
-    $('inv-valor').textContent = formatoCOP(valorTotal);
+    // Si no se pudo leer la lista de digitales, no se muestran numeros que podrian ser incorrectos
+    var sinDigitales = !!resDigitales.error;
+    $('inv-total').textContent = sinDigitales ? '---' : totalItems;
+    $('inv-stock-bajo').textContent = sinDigitales ? '---' : stockBajo;
+    $('inv-sin-stock').textContent = sinDigitales ? '---' : sinStock;
+    $('inv-valor').textContent = sinDigitales ? '---' : formatoCOP(Math.round(valorTotal));
 
     var tbody = $('alertas-inventario-tbody');
     if (!tbody) return;
@@ -127,7 +137,7 @@
 
     tbody.innerHTML = alertas.map(function (d) {
       var stock = parseInt(d.stock_actual) || 0;
-      var estado = stock === 0
+      var estado = stock <= 0
         ? '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 dark:bg-red-950/30 text-red-600 dark:text-red-400">Agotado</span>'
         : '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400">Stock Bajo</span>';
       return '<tr class="border-b border-slate-100 dark:border-slate-800/50 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">' +
