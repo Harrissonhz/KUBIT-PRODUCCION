@@ -40,7 +40,9 @@
     $('campo-rango-hasta').value = c.rango_hasta || '';
     $('campo-vencimiento').value = c.fecha_vencimiento_resolucion ? c.fecha_vencimiento_resolucion.slice(0, 10) : '';
     $('campo-mensaje-legal').value = c.mensaje_legal || '';
-    $('campo-impuesto').value = c.impuesto_default || '19';
+    // Fase 33: el 0 (exento) es un valor valido; solo se usa 0 si no hay dato
+    var imp = parseFloat(c.impuesto_default);
+    $('campo-impuesto').value = String(isNaN(imp) ? 0 : imp);
   }
 
   function obtenerDatosForm() {
