@@ -600,6 +600,42 @@
     mostrarToast('Formulario limpiado');
   }
 
+  /* Fase 39: aviso que NO se cierra solo (errores al guardar o al editar una venta) */
+  function mostrarAlertaVenta(titulo, mensaje) {
+    $('alerta-titulo').textContent = titulo;
+    $('alerta-mensaje').textContent = mensaje;
+    $('modal-alerta').classList.remove('hidden');
+    $('btn-alerta-cerrar').focus();
+  }
+  function cerrarAlertaVenta() {
+    $('modal-alerta').classList.add('hidden');
+  }
+  function restaurarBotonProcesar() {
+    _loading = false;
+    var b = $('btn-procesar');
+    b.disabled = false;
+    b.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg> Procesar Venta';
+  }
+  /* Fase 39: deshace una venta recien creada cuyo stock no se pudo descontar completo.
+     Orden: primero se marca ANULADA y despues se devuelve el stock de lo ya descontado,
+     para que cualquier fallo intermedio deje un estado que se pueda revisar. */
+  async function revertirVentaNueva(ventaId, numeroVenta, descontados, usuarioId) {
+    var upd = await DB.update('pos_ventas', ventaId, { estado: 'ANULADA' });
+    if (upd.error) return { ventaAnulada: false, error: upd.error, stockFallido: [] };
+    var fallidos = [];
+    for (var i = descontados.length - 1; i >= 0; i--) {
+      var it = descontados[i];
+      var r = await DB.productos.ajustarStock(
+        it.detalleId,
+        it.cantidad,
+        'devolucion_venta',
+        'Reverso de la venta #' + numeroVenta + ' (no se pudo completar)',
+        { usuarioId: usuarioId, referencia: numeroVenta }
+      );
+      if (r.error) fallidos.push(it.nombre);
+    }
+    return { ventaAnulada: true, error: null, stockFallido: fallidos };
+  }
   async function procesarVenta() {
     if (_loading) return;
     _loading = true;
@@ -617,6 +653,24 @@
         return;
       }
 
+      // Fase 39: al editar, la venta original debe seguir vigente (evita editarla dos veces)
+      var numeroOriginal = null;
+      if (VENTA_EDITANDO_ID) {
+        var chk = await DB.ventas.obtener(VENTA_EDITANDO_ID);
+        if (chk.error || !chk.data) {
+          mostrarAlertaVenta('No se pudo verificar la venta original',
+            'No se pudo comprobar el estado de la venta que se esta editando: ' + (chk.error || 'no existe') + '\nNo se guardo nada. Intente de nuevo.');
+          restaurarBotonProcesar();
+          return;
+        }
+        numeroOriginal = chk.data.numero_venta || VENTA_EDITANDO_ID;
+        if (chk.data.estado !== 'CONFIRMADA' && chk.data.estado !== 'PENDIENTE') {
+          mostrarAlertaVenta('La venta original ya no esta vigente',
+            'La venta ' + numeroOriginal + ' esta ' + chk.data.estado + ' (se anulo o se edito antes).\nNo se guardo nada para evitar ventas duplicadas. Revise el Historial.');
+          restaurarBotonProcesar();
+          return;
+        }
+      }
       var user = window.KubitAuth.obtenerUsuario();
       var canalCodigo = CANAL_ACTIVO;
       var canal = CANALES.find(function (c) { return c.codigo === canalCodigo; });
@@ -680,7 +734,12 @@
       }
 
       ULTIMA_VENTA_ID = res.data.id;
+      var ventaNuevaId = res.data.id;
 
+      // Fase 39: el stock se descuenta de forma estricta. Si algo falla, se deshace la venta
+      // en lugar de dejarla a medias (registrada pero sin stock descontado).
+      var descontados = [];
+      var falloStock = null;
       for (var j = 0; j < CARRITO.length; j++) {
         var item = CARRITO[j];
         var stockRes = await DB.productos.ajustarStock(
@@ -692,8 +751,11 @@
         );
         if (stockRes.error) {
           console.error('[Ventas] Error ajustando stock de ' + item.nombre + ':', stockRes.error);
-          mostrarToast('Error ajustando stock: ' + stockRes.error);
-        } else if (stockRes.data && stockRes.data.stock_nuevo !== undefined) {
+          falloStock = { item: item, error: stockRes.error };
+          break;
+        }
+        descontados.push(item);
+        if (stockRes.data && stockRes.data.stock_nuevo !== undefined) {
           for (var k = 0; k < PRODUCTOS.length; k++) {
             if (PRODUCTOS[k].detalleId === item.detalleId) {
               PRODUCTOS[k].stock = stockRes.data.stock_nuevo;
@@ -702,12 +764,31 @@
           }
         }
       }
+      if (falloStock) {
+        var rev = await revertirVentaNueva(ventaNuevaId, ventaData.numero_venta, descontados, user.id);
+        ULTIMA_VENTA_ID = null;
+        await cargarProductos();
+        var msgStock = 'No se pudo descontar el stock de ' + falloStock.item.nombre + ': ' + falloStock.error + '\n';
+        if (rev.ventaAnulada) {
+          msgStock += 'La venta ' + ventaData.numero_venta + ' se cancelo y no quedo registrada. Sus datos siguen en pantalla para intentarlo de nuevo.';
+          if (rev.stockFallido.length) {
+            msgStock += '\nATENCION: no se pudo devolver el stock de: ' + rev.stockFallido.join(', ') + '. Revise el inventario de esos productos.';
+          }
+        } else {
+          msgStock += 'ATENCION: la venta ' + ventaData.numero_venta + ' quedo registrada y no se pudo cancelar (' + rev.error + '). ' +
+            'Stock ya descontado: ' + (descontados.length ? descontados.map(function (d) { return d.nombre + ' x' + d.cantidad; }).join(', ') : 'ninguno') + '. ' +
+            'Revise el inventario y el Historial antes de continuar.';
+        }
+        mostrarAlertaVenta('No se pudo completar la venta', msgStock);
+        restaurarBotonProcesar();
+        return;
+      }
 
       var fd = new Date(fechaVenta);
       var anio = fd.getFullYear();
       var mes = fd.getMonth() + 1;
 
-      await DB.finanzasMensuales.actualizarPorVenta(
+      var finRes = await DB.finanzasMensuales.actualizarPorVenta(
         anio,
         mes,
         t.total,
@@ -715,14 +796,34 @@
         esMarketplace ? (t.cargoVenta + t.cargoImpuestos + t.cargoEnvios) : 0,
         CARRITO.reduce(function (s, i) { return s + (i.precioCompra || 0) * i.cantidad; }, 0)
       );
+      // Fase 39: la venta ya es valida; si el acumulador mensual falla, se avisa (no se deshace)
+      var avisoFinanzas = null;
+      if (finRes && finRes.error) {
+        console.error('[Ventas] Error actualizando el acumulador mensual:', finRes.error);
+        avisoFinanzas = 'Atencion: no se pudo actualizar el acumulador mensual. Las Ventas Brutas del Panel de este mes pueden quedar por debajo de lo real.';
+      }
 
       // Si estamos editando, anular la venta original (Void + Recreate)
       var editando = !!VENTA_EDITANDO_ID;
       if (editando) {
         var anularRes = await DB.ventas.anularConRevertir(VENTA_EDITANDO_ID, { usuarioId: user.id });
         if (anularRes.error) {
+          // Fase 39: no dejar dos ventas activas. Se deshace la venta nueva (la original sigue vigente).
           console.error('[Ventas] Error al anular venta original:', anularRes.error);
-          mostrarToast('Venta nueva creada, pero la original NO se anulo: ' + anularRes.error + ' Anulela desde Historial.', 'error');
+          var deshacer = await DB.ventas.anularConRevertir(ventaNuevaId, { usuarioId: user.id });
+          ULTIMA_VENTA_ID = null;
+          await cargarProductos();
+          if (deshacer.error) {
+            mostrarAlertaVenta('Quedaron DOS ventas activas',
+              'No se pudo anular la venta original ' + numeroOriginal + ' (' + anularRes.error + ') ni deshacer la venta nueva ' + ventaData.numero_venta + ' (' + deshacer.error + ').\n' +
+              'Abra el Historial y anule UNA de las dos: su stock se devuelve automaticamente. Normalmente se anula la original ' + numeroOriginal + ' y se conserva la nueva.');
+          } else {
+            mostrarAlertaVenta('La edicion no se guardo',
+              'No se pudo anular la venta original ' + numeroOriginal + ': ' + anularRes.error + '\n' +
+              'La venta original sigue vigente y la venta nueva ' + ventaData.numero_venta + ' quedo anulada. Sus datos siguen en pantalla para intentarlo de nuevo.');
+          }
+          restaurarBotonProcesar();
+          return;
         } else if (anularRes.data && anularRes.data.advertencias && anularRes.data.advertencias.length) {
           // Fase 30: la original se anulo, pero algo menor fallo (ej. finanzas)
           mostrarToast('Venta editada con advertencias: ' + anularRes.data.advertencias.join(' | '), 'info');
@@ -732,7 +833,7 @@
 
       var metodoNombre = $('select-metodo-pago').options[$('select-metodo-pago').selectedIndex].text;
       var resumen = formatearMoneda(t.total) + ' · ' + metodoNombre + ' · ' + CARRITO.reduce(function (s, i) { return s + i.cantidad; }, 0) + ' items';
-      $('exito-resumen').textContent = resumen;
+      $('exito-resumen').textContent = resumen + (avisoFinanzas ? ' · ' + avisoFinanzas : '');
       $('exito-titulo').textContent = editando ? 'Venta Editada' : 'Venta Completada';
       $('modal-exito').classList.remove('hidden');
       cargarEstadisticas();
@@ -987,8 +1088,9 @@
     });
 
     $('btn-procesar').addEventListener('click', procesarVenta);
-    $('btn-limpiar').addEventListener('click', limpiarFormulario);
+    $('btn-limpiar').addEventListener('click', function () { VENTA_EDITANDO_ID = null; limpiarFormulario(); }); // Fase 40: limpiar cancela la edicion
     $('btn-cerrar-exito').addEventListener('click', cerrarExito);
+    $('btn-alerta-cerrar').addEventListener('click', cerrarAlertaVenta);
     $('btn-nueva-venta').addEventListener('click', nuevaVenta);
     $('btn-imprimir-factura').addEventListener('click', function () {
       if (!ULTIMA_VENTA_ID) return;
