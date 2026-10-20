@@ -1,4 +1,4 @@
-var CACHE = 'kubit-pos-20261016-10'; // Bump: YYYYMMDD-NN (incrementar NN por cada deploy del mismo dia)
+var CACHE = 'kubit-pos-20261016-11'; // Bump: YYYYMMDD-NN (incrementar NN por cada deploy del mismo dia)
 var ES_LOCAL = self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1';
 
 var ASSETS = [

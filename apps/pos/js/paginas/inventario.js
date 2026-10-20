@@ -1,7 +1,9 @@
 (function () {
   'use strict';
 
-  var PRODUCTOS_DETALLE = [];
+  var PRODUCTOS_DETALLE = [];   // todos los SKU activos (lo usa el buscador del Ajuste Manual)
+  var PRODUCTOS_FISICOS = [];   // Fase 42: SKU activos sin productos Digitales (resumen y tabla de Existencias)
+  var DIGITALES_OK = true;      // false si no se pudo leer la lista de productos Digitales
   var MOVIMIENTOS = [];
   var PAGE_SIZE = 10;
   var PAGINA_INV = 1;
@@ -34,11 +36,38 @@
   }
 
   async function cargarProductosDetalle() {
-    var res = await DB.productos.listarConDetalle({ skipCache: true });
+    var resultados = await Promise.all([
+      DB.productos.listarConDetalle({ skipCache: true }),
+      // Fase 42: misma regla que Panel y Reportes: los productos digitales no son mercancia fisica
+      DB.select('pos_productos', { select: 'id', filters: [{ col: 'tipo_producto', val: 'Digital' }] })
+    ]);
+    var res = resultados[0];
+    var resDigitales = resultados[1];
     if (res.error) { console.error('[Inventario] Error productos:', res.error); return; }
     PRODUCTOS_DETALLE = (res.data || []).filter(function (d) {
       return d.producto && d.producto.activo !== false;
     });
+    DIGITALES_OK = !resDigitales.error;
+    if (!DIGITALES_OK) {
+      console.error('[Inventario] Error leyendo productos digitales:', resDigitales.error);
+      PRODUCTOS_FISICOS = PRODUCTOS_DETALLE;
+      return;
+    }
+    var idsDigital = {};
+    (resDigitales.data || []).forEach(function (p) { idsDigital[p.id] = true; });
+    PRODUCTOS_FISICOS = PRODUCTOS_DETALLE.filter(function (d) { return !idsDigital[d.producto_id]; });
+  }
+
+  // Fase 42: misma regla que Panel y Reportes
+  //   agotado    = stock <= 0
+  //   stock bajo = 0 < stock <= stock_min del SKU (2 si no tiene)
+  //   con stock  = stock > stock_min del SKU
+  function estadoStock(d) {
+    var stock = parseInt(d.stock_actual) || 0;
+    var minimo = d.stock_min || 2;
+    if (stock <= 0) return 'agotado';
+    if (stock <= minimo) return 'bajo';
+    return 'ok';
   }
 
   async function cargarMovimientos() {
@@ -49,17 +78,20 @@
   }
 
   function renderizarResumen() {
-    var total = PRODUCTOS_DETALLE.length;
+    var total = PRODUCTOS_FISICOS.length;
     var conStock = 0, stockBajo = 0, agotados = 0;
-    PRODUCTOS_DETALLE.forEach(function (d) {
-      if ((d.stock_actual || 0) > 10) conStock++;
-      else if ((d.stock_actual || 0) > 0) stockBajo++;
+    PRODUCTOS_FISICOS.forEach(function (d) {
+      var estado = estadoStock(d);
+      if (estado === 'ok') conStock++;
+      else if (estado === 'bajo') stockBajo++;
       else agotados++;
     });
-    $('stat-total-productos').textContent = total;
-    $('stat-con-stock').textContent = conStock;
-    $('stat-stock-bajo').textContent = stockBajo;
-    $('stat-agotados').textContent = agotados;
+    // Si no se pudo leer la lista de digitales, no se muestran numeros que podrian ser incorrectos
+    var sd = !DIGITALES_OK;
+    $('stat-total-productos').textContent = sd ? '---' : total;
+    $('stat-con-stock').textContent = sd ? '---' : conStock;
+    $('stat-stock-bajo').textContent = sd ? '---' : stockBajo;
+    $('stat-agotados').textContent = sd ? '---' : agotados;
     if (!window._resumenHandlersAttached) {
       document.querySelectorAll('[data-stat]').forEach(function (card) {
         card.addEventListener('click', function () {
@@ -74,13 +106,13 @@
      FILTER + PAGINATION: Existencias
      ════════════════════════════════════════ */
   function obtenerListaFiltrada() {
-    var lista = PRODUCTOS_DETALLE;
+    var lista = PRODUCTOS_FISICOS;
     if (FILTRO_RESUMEN === 'con_stock') {
-      lista = lista.filter(function (d) { return (d.stock_actual || 0) > 10; });
+      lista = lista.filter(function (d) { return estadoStock(d) === 'ok'; });
     } else if (FILTRO_RESUMEN === 'stock_bajo') {
-      lista = lista.filter(function (d) { return (d.stock_actual || 0) > 0 && (d.stock_actual || 0) <= 10; });
+      lista = lista.filter(function (d) { return estadoStock(d) === 'bajo'; });
     } else if (FILTRO_RESUMEN === 'agotados') {
-      lista = lista.filter(function (d) { return (d.stock_actual || 0) === 0; });
+      lista = lista.filter(function (d) { return estadoStock(d) === 'agotado'; });
     }
     var q = ($('buscador').value || '').toLowerCase().trim();
     if (!q) return lista;
@@ -111,10 +143,11 @@
       var p = d.producto || {};
       var cat = (p.categoria && p.categoria.nombre) || '—';
       var stock = d.stock_actual || 0;
-      var badgeCls = stock > 10 ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' :
-                     stock > 0 ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400' :
+      var estado = estadoStock(d);
+      var badgeCls = estado === 'ok' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' :
+                     estado === 'bajo' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400' :
                      'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400';
-      var badgeTxt = stock > 10 ? 'OK' : stock > 0 ? 'Bajo' : 'Agotado';
+      var badgeTxt = estado === 'ok' ? 'OK' : estado === 'bajo' ? 'Bajo' : 'Agotado';
       return '<tr class="border-b border-slate-100 dark:border-slate-800/50 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">' +
         '<td class="py-3 px-2"><span class="text-sm font-medium text-slate-950 dark:text-white">' + (p.nombre || '—') + '</span></td>' +
         '<td class="py-3 px-2 text-sm text-slate-500 dark:text-slate-400 hidden sm:table-cell">' + (d.codigo_interno || '—') + '</td>' +
