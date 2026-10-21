@@ -1552,11 +1552,30 @@ window.DB = (function () {
     if (!/^https?:\/\/[^\s\/$.?#][^\s]*$/i.test(s)) return null;
     return s;
   }
+  // Fase 44: enlace al WMS debajo de "Tienda Virtual".
+  // #link-wms no esta en el HTML de las paginas: se crea aqui para no editar las 17 que tienen menu.
+  // Copia la clase CSS de "Tienda Virtual" (sin 'hidden'), asi se ve igual en modo claro y oscuro.
+  function asegurarLinkWms(linkTienda) {
+    var existente = document.getElementById('link-wms');
+    if (existente) return existente;
+    var a = document.createElement('a');
+    a.id = 'link-wms';
+    a.href = '#';
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.className = linkTienda.className.replace(/\bhidden\b/g, '').replace(/\s+/g, ' ').trim();
+    // Marcado fijo (icono de cubo + texto): no incluye datos de la base
+    a.innerHTML = '<svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">' +
+      '<path stroke-linecap="round" stroke-linejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9"/>' +
+      '</svg>WMS';
+    linkTienda.parentNode.insertBefore(a, linkTienda.nextSibling);
+    return a;
+  }
   function cargarLinkTienda() {
     var link = document.getElementById('link-tienda-virtual');
     if (!link) return;
     configuracionEmpresa.obtener().then(function (res) {
-      if (res.error) return; // ante un fallo de lectura, el enlace queda como esta
+      if (res.error) return; // ante un fallo de lectura, los enlaces quedan como estan
       var url = normalizarUrlTienda(res.data && res.data.store_url);
       if (url) {
         link.href = url;
@@ -1566,6 +1585,20 @@ window.DB = (function () {
         // Sin URL valida configurada, el enlace se oculta
         link.classList.add('hidden');
         link.style.display = 'none';
+      }
+      // Fase 44: WMS (misma regla; si no hay URL valida el enlace no se crea o se oculta)
+      var urlWms = normalizarUrlTienda(res.data && res.data.wms_url);
+      if (urlWms) {
+        var linkWms = asegurarLinkWms(link);
+        linkWms.href = urlWms;
+        linkWms.classList.remove('hidden');
+        linkWms.style.display = '';
+      } else {
+        var wmsExistente = document.getElementById('link-wms');
+        if (wmsExistente) {
+          wmsExistente.classList.add('hidden');
+          wmsExistente.style.display = 'none';
+        }
       }
     }).catch(function () {});
   }

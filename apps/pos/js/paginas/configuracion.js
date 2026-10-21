@@ -34,6 +34,7 @@
     $('campo-sitio-web').value = c.sitio_web || '';
     $('campo-logo-url').value = c.logo_url || '';
     $('campo-store-url').value = c.store_url || '';
+    $('campo-wms-url').value = c.wms_url || '';
     $('campo-resolucion').value = c.resolucion_dian || '';
     $('campo-prefijo').value = c.prefijo_facturacion || '';
     $('campo-rango-desde').value = c.rango_desde || '';
@@ -55,6 +56,7 @@
       sitio_web: $('campo-sitio-web').value.trim() || null,
       logo_url: $('campo-logo-url').value.trim() || null,
       store_url: $('campo-store-url').value.trim() || null,
+      wms_url: $('campo-wms-url').value.trim() || null,
       resolucion_dian: $('campo-resolucion').value.trim(),
       prefijo_facturacion: $('campo-prefijo').value.trim() || null,
       rango_desde: parseInt($('campo-rango-desde').value) || null,
