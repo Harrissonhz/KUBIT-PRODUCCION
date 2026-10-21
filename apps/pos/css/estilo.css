@@ -261,3 +261,25 @@ input[type="number"] {
 .dark .herramienta-card:hover {
   border-color: #64748b !important;
 }
+
+/* Sidebar: columna flexible (Fase 43)
+   Encabezado fijo arriba, lista de opciones con scroll propio y pie fijo abajo
+   (Tienda Virtual / Cerrar sesion). Evita que los grupos abiertos pasen por
+   detras del pie. Aplica a todas las paginas con <nav id="sidebar"> sin editar sus HTML. */
+#sidebar {
+  display: flex;
+  flex-direction: column;
+}
+#sidebar > div:first-child {
+  flex: 0 0 auto;
+}
+#sidebar > div:nth-child(2) {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+#sidebar > div:last-child {
+  position: static;
+  flex: 0 0 auto;
+}
