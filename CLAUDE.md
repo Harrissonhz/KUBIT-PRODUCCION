@@ -2,7 +2,7 @@
 
 Este archivo es la **memoria oficial del proyecto** para cualquier IA que trabaje en el ecosistema Kubit. Contiene las reglas, el stack, las decisiones ya tomadas y el estado actual del desarrollo. Leerlo completo antes de cualquier intervención.
 
-**Ultima actualizacion:** 2026-10-18 — se documentaron las Fases 30 a 41 del POS (secciones 5, 7.2, 7.3, 10 y 13).
+**Ultima actualizacion:** 2026-10-21 — se documentaron las Fases 42 a 44 del POS (secciones 3.1, 5, 7.1, 7.2, 7.3, 11 y 13). Las Fases 30 a 41 se documentaron el 2026-10-18.
 
 ---
 
@@ -56,7 +56,8 @@ Este archivo es la **memoria oficial del proyecto** para cualquier IA que trabaj
 ├── README.md
 ├── specs/                 ← Fuente de verdad (Spec-Driven Development)
 │   ├── 01-master-spec.md
-│   ├── 02-database-schema.sql
+│   ├── 01-schema.sql      ← Esquema completo de la base de datos (en documentos antiguos aparece como 02-database-schema.sql)
+│   ├── 13-pos-wms-url.sql ← Fase 44: columna wms_url en pos_configuracion_empresa
 │   ├── 03-pos-spec.md
 │   ├── 04-store-spec.md
 │   ├── 05-ui-ux-system.md
@@ -186,17 +187,17 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 | Rol admin duplicado eliminado | El rol `admin` (UUID `00000000-0000-0000-0000-000000000001`) se creo en la migracion V1 como copia del seed `Administrador`. Todos sus usuarios se migraron al rol `Administrador` real (UUID `6442e6cd-...`). Luego se elimino el rol y sus `pos_rol_permisos`. Ahora solo existe 1 rol de administracion. |
 | Zona horaria Colombia | La base de datos usa `America/Bogota` (UTC-5). Configurado via `ALTER DATABASE postgres SET timezone = 'America/Bogota'`. Esto permite que strings de fecha sin timezone (ej. `2026-07-05T00:00:00`) se interpreten como hora Colombia. Las columnas `timestamptz` siguen almacenando UTC internamente. No migra datos existentes. El script `13-migrate-timezone.sql` contiene este cambio para despliegue en produccion. |
 | Gastos en vivo desde detalle | El KPI "Gastos" del Panel Dashboard NO debe leer `pos_finanzas_mensuales.gastos_operativos_total` (tabla pre-agregada que nunca se actualiza al crear/editar gastos). En su lugar usa `DB.gastos.totalDelMes()` que suma `monto` en vivo desde `pos_gastos_mensuales_detalle` via PostgREST, mismo patron que `DB.compras.totalDelMes()`. |
-| Indicadores de inventario por SKU (Fases 35-37) | Panel y Reportes (pestana Inventario) usan la misma regla por SKU (variante): **Total SKU** = cantidad de variantes fisicas; **Agotados** = `stock_actual <= 0`; **Stock Bajo** = `stock_actual > 0` y `stock_actual <= stock_min` (2 si el SKU no tiene minimo); **Valor Inventario PVP** = suma de `precio_venta * stock_actual` (solo stock positivo), redondeado a pesos. Reemplaza la formula anterior (costo, o `precio_venta / 1.30` si no habia costo), que mezclaba costo con venta y contaba los productos digitales. Pendiente: la pantalla Inventario (`inventario.html`) sigue usando el tope fijo de 10 unidades para "Stock Bajo". |
+| Indicadores de inventario por SKU (Fases 35-37 y 42) | Panel, Reportes (pestana Inventario) e Inventario (`inventario.html`, Fase 42) usan la misma regla por SKU (variante): **Total SKU** = cantidad de variantes fisicas; **Agotados** = `stock_actual <= 0`; **Stock Bajo** = `stock_actual > 0` y `stock_actual <= stock_min` (2 si el SKU no tiene minimo); **Con Stock** (solo en Inventario) = `stock_actual > stock_min`, el complemento de Stock Bajo; **Valor Inventario PVP** = suma de `precio_venta * stock_actual` (solo stock positivo), redondeado a pesos. Reemplaza la formula anterior (costo, o `precio_venta / 1.30` si no habia costo), que mezclaba costo con venta y contaba los productos digitales. Antes de la Fase 42, `inventario.html` usaba un tope fijo de 10 unidades (Con Stock `> 10`, Stock Bajo de 1 a 10, Agotados `=== 0`) y contaba los productos digitales. |
 | Productos Vendidos Hoy | Nuevo KPI operativo que suma `cantidad` de `pos_ventas_detalle` para ventas CONFIRMADA del dia actual, via `DB.ventas.productosVendidosHoy()` usando PostgREST join embed `pos_ventas -> pos_ventas_detalle`. |
 | Datos historicos en ventas_netas | `pos_finanzas_mensuales.ventas_brutas` migro desde V1 solo a partir de Nov 2025. Meses anteriores (Sep 2023-Oct 2025) tienen `ventas_brutas=0` y datos reales en `ventas_netas`. `porMes()` y `cargarKpisMes()` usan `ventas_brutas || ventas_netas || 0` como fallback. |
 | Tendencia de Ventas (multi-year line chart) | El grafico "Tendencia de Ventas" usa `DB.ventas.todosLosAnios()` que consulta `pos_finanzas_mensuales` completo. Una linea por ano con `spanGaps:false` (null en meses sin datos). Paleta progresiva slate (mas antiguo) → sky → emerald (mas reciente). Tabla resumen con total, crecimiento %, promedio mensual y barra visual. |
 | Rango de anos en dropdowns | `filtro-anio`, `chart-anio`, `comp-anio1`, `comp-anio2` generados con `for (a = anioAct + 1; a >= 2023; a--)`. Incluye 2023 porque hay datos desde Sep 2023. |
 | Recepcion de Compras solo via flujo recibir() | El estado "RECIBIDA" NO debe asignarse directamente via dropdown `campo-estado` + PATCH. El unico camino valido es mediante `DB.comprasDetalle.recibir()` que crea movimiento de inventario (`entrada_compra`), actualiza `stock_actual` en `pos_productos_detalle` y establece `cantidad_recibida`. Ver `compras.js::guardar()` que ahora detecta cambio a RECIBIDA y auto-ejecuta recibir() para cada item pendiente. |
-| Smart Stats Filter (Inventario) | Las 4 cards del Resumen de Inventario (Total Productos, Con Stock, Stock Bajo, Agotados) son clickeables con `data-stat` y actuan como filtro AND con el buscador de texto sobre la tabla de Existencias Actuales. Click en una card activa el filtro con `ring-2` del color correspondiente. Click en la misma card o en el pill `✕` lo desactiva. `FILTRO_RESUMEN` es la variable de estado. `aplicarFiltroResumen()` y `actualizarFiltroUI()` manejan la logica. Sin cambios en DB — todo client-side sobre `PRODUCTOS_DETALLE`. |
+| Smart Stats Filter (Inventario) | Las 4 cards del Resumen de Inventario (Total Productos, Con Stock, Stock Bajo, Agotados) son clickeables con `data-stat` y actuan como filtro AND con el buscador de texto sobre la tabla de Existencias Actuales. Click en una card activa el filtro con `ring-2` del color correspondiente. Click en la misma card o en el pill `✕` lo desactiva. `FILTRO_RESUMEN` es la variable de estado. `aplicarFiltroResumen()` y `actualizarFiltroUI()` manejan la logica. Sin cambios en DB — todo client-side sobre `PRODUCTOS_FISICOS` (SKU activos sin productos `Digital`, Fase 42; `PRODUCTOS_DETALLE` conserva todos los activos y solo lo usa el buscador del Ajuste Manual). |
 | Politica estricta de recepcion | `database.js::recibir()` NUNCA deja un item marcado recibido sin inventario. Si falla el INSERT del movimiento → revierte el PATCH del detalle y retorna error visible. Si falla el update de `stock_actual` → elimina el movimiento huerfano (hard delete), revierte el detalle y retorna error. Causa raiz: en produccion (OC #64, SKU AL115-Rosa) una recepcion actualizo el detalle pero movimiento+stock fallaron silenciosamente dejando stock DB=12 vs fisico=17 |
 | Proteccion de estado en guardar compras | `compras.js::guardar()` (modo edicion) recalcula el estado desde los detalles reales si el dropdown dice PENDIENTE: todos RECIBIDO → fuerza RECIBIDA, algunos → RECIBIENDO, con toast informativo. Nunca revierte una recepcion ya registrada. Causa raiz: OC #63 quedo PENDIENTE con 7/7 items recibidos porque un Guardar posterior sobrescribio el estado desde el dropdown desactualizado |
 | checkTodos excluye soft-deleted a proposito | El query de `recibir()` que decide RECIBIDA/RECIBIENDO usa el filtro default (`deleted_at=is.null`): las filas soft-deleted ya no hacen parte de la orden y no deben bloquear el paso a RECIBIDA. A diferencia del lookup de variante que SI usa `incluirEliminados:true` (el stock debe actualizarse siempre) |
-| Productos digitales fuera del inventario (Fases 35-37) | Los productos con `tipo_producto = 'Digital'` (cursos y domicilio) tienen stock simbolico enorme y NO son mercancia fisica: Panel y Reportes los excluyen de los 4 indicadores de inventario. Se leen con `DB.select('pos_productos', { select: 'id', filters: [{ col: 'tipo_producto', val: 'Digital' }] })`; si esa lectura falla, los indicadores muestran `---`. |
+| Productos digitales fuera del inventario (Fases 35-37) | Los productos con `tipo_producto = 'Digital'` (cursos y domicilio) tienen stock simbolico enorme y NO son mercancia fisica: Panel, Reportes e Inventario (Fase 42) los excluyen de los indicadores de inventario. Se leen con `DB.select('pos_productos', { select: 'id', filters: [{ col: 'tipo_producto', val: 'Digital' }] })`; si esa lectura falla, los indicadores muestran `---` (en Inventario la tabla de Existencias sigue mostrando todos los SKU activos). |
 | El stock solo cambia con movimientos (Fases 30-31) | `stock_actual` solo se modifica con `DB.productos.ajustarStock()`: inserta PRIMERO el movimiento en `pos_movimientos_inventario` y despues actualiza el stock; si falla el stock, borra el movimiento (nunca queda stock cambiado sin movimiento). `detalleActualizar()` ignora `stock_actual`. La ficha de producto no envia stock al editar: el campo es de solo lectura y se cambia desde Inventario (entradas/salidas). Al crear un producto o una variante nace con stock 0 y el stock inicial se registra como `ajuste_incremento` con motivo "Stock inicial". Causa raiz: antes la ficha reescribia `stock_actual` con el valor cargado al abrirla, sin movimiento, y descuadraba el inventario. El WMS (`apps/wms`) solo lee `pos_*` y `st_*` y depende de que cada cambio de stock deje un movimiento. |
 | Anular una venta (Fase 30) | `DB.ventas.anularConRevertir()` es el unico camino: solo ventas CONFIRMADA o PENDIENTE; devuelve el stock con movimientos `devolucion_venta` (motivo `Anulacion venta #<numero>`, `referencia` = numero de venta); marca ANULADA solo si todo el stock quedo bien (si un producto falla, deshace los anteriores y no anula); revierte las finanzas del mes al final y, si eso falla, devuelve `advertencias[]`. `entrada_anulacion` NO existe en el CHECK de `pos_movimientos_inventario`: no usarlo. El boton "Anular Venta" del historial usa `anularConRevertir()` (antes `DB.ventas.anular()` solo cambiaba el estado). El WMS aun no procesa `devolucion_venta` (D2 pendiente). |
 | Vender y editar sin dejar ventas a medias (Fases 39-40) | `ventas.js::procesarVenta()`: (1) al editar, antes de crear verifica que la venta original siga CONFIRMADA o PENDIENTE; (2) si falla el descuento de stock de algun producto, marca la venta nueva ANULADA y despues devuelve el stock de lo ya descontado (`revertirVentaNueva()`); (3) si falla anular la original, anula la venta nueva con `anularConRevertir()` y la original sigue vigente; (4) si tambien falla deshacer la nueva, muestra el cuadro persistente `#modal-alerta` con los dos numeros de venta; (5) si falla el acumulador mensual, la venta se conserva y se avisa en el resumen. "Limpiar Formulario" cancela la edicion (`VENTA_EDITANDO_ID = null`). Limitacion conocida: no se puede editar una venta de la ultima unidad (la validacion de stock no suma las unidades de la original); hay que anularla desde Historial y registrarla de nuevo. |
@@ -205,6 +206,9 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 | Enlace Tienda Virtual desde Configuracion (Fase 34) | El menu lee `pos_configuracion_empresa.store_url` (cada ambiente guarda su propia URL). `database.js::normalizarUrlTienda()` usa la primera direccion si hay varias separadas por coma, punto y coma o espacio, agrega `https://` si falta, acepta solo http/https y oculta el enlace si queda vacio o invalido; si falla la lectura no cambia nada. |
 | Buscador de Ordenes de Compra (Fase 38) | `compras.js::filtrarYRender()` filtra en el navegador por numero de orden, proveedor y Notas (coincidencia parcial, sin distinguir mayusculas), combinado con los filtros de estado y proveedor. Las Notas guardan el ID de la compra en la plataforma de origen. |
 | Orden del Historial de Ventas (Fase 41) | `DB.ventas.listar()` ordena por `fecha_venta.desc,created_at` (mas reciente primero; en empate, la ultima registrada primero). `fecha_venta` tiene precision de minuto, por eso el desempate. El orden se pide a la base porque el listado es paginado. |
+| Estado de stock unico en Inventario (Fase 42) | `inventario.js::estadoStock(d)` devuelve `'agotado'` (`stock_actual <= 0`), `'bajo'` (`0 < stock_actual <= stock_min`, 2 por defecto) u `'ok'` (`stock_actual > stock_min`). La usan las 4 tarjetas, los filtros de las tarjetas y el badge OK/Bajo/Agotado de cada fila, para que nunca se contradigan; Con Stock + Stock Bajo + Agotados = Total SKU. Las tarjetas y la tabla salen de `PRODUCTOS_FISICOS` (activos sin Digital); `DIGITALES_OK` es `false` si fallo la lectura de digitales (tarjetas con `---`, tabla con todos los SKU). `PRODUCTOS_DETALLE` (todos los activos) lo usa solo el buscador de Ajuste Manual. |
+| Menu lateral en columna flexible (Fase 43) | `css/estilo.css` (bloque "Sidebar: columna flexible") convierte `#sidebar` en columna: encabezado fijo (`#sidebar > div:first-child`), lista de grupos con scroll propio (`> div:nth-child(2)`, `flex: 1`, `min-height: 0`, `overflow-y: auto`) y pie fijo (`> div:last-child`, `position: static`) con Tienda Virtual, WMS y Cerrar sesion. Corrige que con varios grupos abiertos la lista pasaba por detras del pie (que era `absolute bottom-0` y transparente). Se resolvio solo con CSS porque las 17 paginas de la raiz de `apps/pos` con menu (todas menos `index`, `login` y las dos de impresion) repiten el mismo HTML. **Regla:** `<nav id="sidebar">` debe seguir teniendo exactamente 3 hijos directos (encabezado, lista, pie); si se agrega otro bloque hay que revisar esos selectores. |
+| Enlace al WMS desde el menu (Fase 44) | La URL del WMS se guarda en `pos_configuracion_empresa.wms_url` (`text`, nullable; script `specs/13-pos-wms-url.sql`, tambien incluida en `specs/01-schema.sql`) y se edita en `configuracion.html` (campo `#campo-wms-url`, "URL WMS (Bodega)"). `database.js::cargarLinkTienda()` crea `#link-wms` debajo de `#link-tienda-virtual` (misma clase CSS, icono de cubo, texto "WMS", `target="_blank" rel="noopener noreferrer"`) y valida la URL con `normalizarUrlTienda()`; si `wms_url` esta vacio o es invalido el enlace no se muestra (o se oculta) y si falla la lectura no aparece. Se crea por JS para no editar las 17 paginas con menu. Cada ambiente guarda su propia URL. **Orden de despliegue:** ejecutar `13-pos-wms-url.sql` en el ambiente ANTES de publicar el codigo, porque `configuracion.js` envia `wms_url` al guardar y sin la columna el guardado falla. El WMS (`apps/wms`) no usa este campo y sigue leyendo solo `pos_*` y `st_*`. |
 | Llave `service_role` y `config.js` | `apps/pos/js/config.js` va en el repositorio (Vercel sirve el POS desde Git) y lleva SOLO la URL y la llave publica `anon`. La llave `service_role` NUNCA va en el frontend ni en GitHub: `supabaseServiceKey` queda `''`. Por eso crear usuarios y cambiar contrasenas ya no funcionan desde el POS: se hacen en Supabase (Authentication > Users). No copiar `config.js` entre ambientes (QA y produccion tienen el suyo). |
 | Flujo de cambios al POS | Un bug o cambio a la vez. Se prueba primero en la carpeta de pruebas (conectada a la base de QA) y despues se lleva a produccion con un solo commit. Cada despliegue sube la version del cache del service worker (`kubit-pos-YYYYMMDD-NN`). `npm test` debe pasar antes del commit (119 pruebas). POS y Tienda usan Ignored Build Step en Vercel (solo se publican si cambia su carpeta). |
 
@@ -231,7 +235,7 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 
 ### 7.1 Completado (Specs)
 - [x] `01-master-spec.md` — Visión general, reglas del SaaS, mapa de artefactos
-- [x] `02-database-schema.sql` — DDL completo (35 tablas con grants, RLS, índices, triggers)
+- [x] `01-schema.sql` — DDL completo (35 tablas con grants, RLS, índices, triggers)
 - [x] `03-pos-spec.md` — Especificación completa del módulo POS
 - [x] `04-store-spec.md` — Especificación completa del módulo Store
 - [x] `05-ui-ux-system.md` — Sistema de diseño UI/UX (Tailwind, colores, responsive, PWA)
@@ -412,7 +416,6 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 - [ ] Bug #14: el descuento global se resta dos veces en `ventas_netas` (hoy el descuento es 0).
 - [ ] Bug #16: "Rentabilidad TOTAL" suma `ventas_netas`.
 - [ ] Bug #17: editar una venta de la ultima unidad (la validacion de stock no suma las unidades de la original).
-- [ ] Unificar la regla de "Stock Bajo" de `inventario.html` (tope fijo de 10) con la de Panel y Reportes (minimo del SKU).
 - [ ] Revision de seguridad en detalle (a tratar aparte).
 
 ### 7.5 Completado (Documentacion de Migracion)
@@ -563,7 +566,7 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 - [x] `service-worker.js` — Cache bump `kubit-pos-20260825-01`.
 - [x] `tests/compartido/database.test.js` — 5 nuevos tests de `DB.comprasDetalle.recibir`: happy path total, parcial (RECIBIENDO), fallo movimiento (revertir), fallo stock (eliminar movimiento + revertir), sobre-recepcion rechazada.
 
-#### Modulo POS — Fases 30 a 41 (octubre 2026)
+#### Modulo POS — Fases 30 a 44 (octubre 2026)
 Cada fase indica que cambio, los archivos y la version del cache. Commits entre parentesis.
 
 **Fase 30 — Anular venta devuelve el stock con movimiento (2026-10-16, `8be5018`, cache `kubit-pos-20261016-01`)**
@@ -609,6 +612,19 @@ Cada fase indica que cambio, los archivos y la version del cache. Commits entre 
 
 **Fase 41 — Orden del Historial de Ventas (2026-10-18, `d02ab83`, cache `-10`)**
 - [x] `database.js::ventas.listar()` — `orderBy: 'fecha_venta.desc,created_at'`.
+
+**Fase 42 — Inventario usa la misma regla de stock que Panel y Reportes (2026-10-20, `1227a65`, cache `-11`)**
+- [x] `inventario.js` — `estadoStock(d)`: agotado `stock_actual <= 0`, stock bajo `0 < stock_actual <= stock_min` (2 por defecto), con stock `stock_actual > stock_min`. Las tarjetas, los filtros y el badge de cada fila usan la misma funcion (antes: tope fijo de 10 unidades y agotado `=== 0`).
+- [x] `inventario.js` — se excluyen los productos `Digital` de las tarjetas y de la tabla de Existencias (`PRODUCTOS_FISICOS`); si falla la lectura de digitales las tarjetas muestran `---`. El buscador del Ajuste Manual conserva todos los SKU activos (`PRODUCTOS_DETALLE`).
+- [x] Cierra el pendiente "unificar Stock Bajo de `inventario.html`". Probada en QA y en produccion.
+
+**Fase 43 — Menu lateral: lista con scroll propio y pie fijo (2026-10-21, cache `-12`)**
+- [x] `css/estilo.css` — bloque "Sidebar: columna flexible (Fase 43)". Corrige que con varios grupos abiertos la lista se superponia con "Tienda Virtual" y "Cerrar sesion". No se tocaron los HTML ni `sidebar.js`.
+
+**Fase 44 — Enlace al WMS en el menu (2026-10-21, cache `-13`)**
+- [x] `specs/01-schema.sql` y `specs/13-pos-wms-url.sql` — columna `wms_url text` en `pos_configuracion_empresa` (script idempotente, con `notify pgrst, 'reload schema'`).
+- [x] `configuracion.html` y `configuracion.js` — campo "URL WMS (Bodega)" (`#campo-wms-url`): se lee en `cargarConfig()` y se guarda en `obtenerDatosForm()`.
+- [x] `database.js::cargarLinkTienda()` — crea `#link-wms` debajo de `#link-tienda-virtual` (ver §5, "Enlace al WMS desde el menu (Fase 44)").
 
 **Datos — Acumulador mensual (bug #3, 2026-10-18, sin cambios de codigo)**
 - [x] Se corrigieron en produccion las filas de `pos_finanzas_mensuales` de ago, sep y oct 2026 para que cuadren con `pos_ventas` (ver §5 y `specs/03-pos-spec.md` §3.6.2). Nov 2025 no se toca (ventas importadas desde CSV).
@@ -1099,7 +1115,7 @@ Cada fase indica que cambio, los archivos y la version del cache. Commits entre 
 | Para encontrar | Buscar |
 |---|---|---|
 | Specs del proyecto | `specs/`, `*-spec.md` |
-| Modelo de datos | `02-database-schema.sql` |
+| Modelo de datos | `01-schema.sql` (esquema completo) y `13-pos-wms-url.sql` (columna `wms_url`) |
 | Diseño UI | `05-ui-ux-system.md` |
 | Reglas del POS | `03-pos-spec.md` |
 | Reglas del Store | `04-store-spec.md` |
@@ -1187,6 +1203,9 @@ Cada fase indica que cambio, los archivos y la version del cache. Commits entre 
 | Renombrar Archivos tool | `renombrar-archivos.html`, `renombrar-archivos.js`, File System Access API, `showDirectoryPicker` |
 | Panel Dashboard | `panel.html`, `panel.js`, KPIs del Mes (finanzas mensuales), KPIs Operativos (ventas hoy/stock bajo) |
 | Store URL desde DB | `configuracion.html#campo-store-url`, `cargarLinkTienda()` y `normalizarUrlTienda()` en `database.js`, `#link-tienda-virtual` en sidebar. Se oculta si `store_url` esta vacio o es invalido (Fase 34). |
+| Enlace WMS desde el menu | `wms_url`, `#campo-wms-url`, `#link-wms`, `cargarLinkTienda()` y `asegurarLinkWms()` en `database.js`, `specs/13-pos-wms-url.sql` (Fase 44). |
+| Menu lateral columna flexible | `css/estilo.css`, bloque `Sidebar: columna flexible`, selectores `#sidebar`, `#sidebar > div:first-child`, `:nth-child(2)`, `:last-child` (Fase 43). |
+| Estado de stock en Inventario | `inventario.js::estadoStock()`, `PRODUCTOS_FISICOS`, `DIGITALES_OK` (Fase 42). |
 | Top 5 productos | `database.js::ventas.topProductos(limite)`, agregacion por `pos_ventas_detalle` del mes actual |
 | Sidebar compartido | `js/compartido/sidebar.js`, `toggleSidebar()`, paginas no-CRUD |
 | Action buttons patron | `#action-bar`, natural flow, `flex flex-col sm:flex-row gap-3`, show/hide contextual |
@@ -1252,7 +1271,7 @@ Cada fase indica que cambio, los archivos y la version del cache. Commits entre 
 | incluirEliminados en recibir | `database.js::recibir()` usa `incluirEliminados: true` para encontrar variantes soft-deleted. Si se omite, `select()` helper agrega `deleted_at=is.null` y el stock update se salta. |
 | cacheClear post-recepcion | `database.js::recibir()` ahora hace `_cacheClear('productos')` para que el stock actualizado se refleje inmediatamente en el POS. |
 | Bug: estado RECIBIDA sin stock update | Si una orden de compra tiene `estado=RECIBIDA` pero `cantidad_recibida=0`, es porque se marco via dropdown saltando `recibir()`. Solucion: ejecutar "Recibir Todo" en la UI o editar y guardar con RECIBIDA (el fix auto-ejecuta recibir). |
-| Smart Stats Filter | `inventario.js::FILTRO_RESUMEN`, `aplicarFiltroResumen()`, `actualizarFiltroUI()`, `data-stat`, `#card-stat-*`, `#filtro-activo`. Cards de resumen clickeables filtran tabla de Existencias Actuales con AND logico + buscador. Todo client-side sobre `PRODUCTOS_DETALLE`. |
+| Smart Stats Filter | `inventario.js::FILTRO_RESUMEN`, `aplicarFiltroResumen()`, `actualizarFiltroUI()`, `data-stat`, `#card-stat-*`, `#filtro-activo`. Cards de resumen clickeables filtran tabla de Existencias Actuales con AND logico + buscador. Todo client-side sobre `PRODUCTOS_FISICOS` (Fase 42). |
 | Filtro interactivo inventario | `inventario.html` cards con `data-stat="total|con_stock|stock_bajo|agotados"`, `cursor-pointer`, `ring-2` al activarse. Pill `#filtro-activo` con label y boton `✕` para limpiar. |
 | Recepcion de Compras auto | `compras.js::guardar()` detecta estado RECIBIDA y auto-ejecuta `DB.comprasDetalle.recibir()` por item. No usar `campo-estado` + PATCH directo. |
 | incluirEliminados en recibir | `database.js::recibir()` usa `incluirEliminados: true` para encontrar variantes soft-deleted. Si se omite, `select()` helper agrega `deleted_at=is.null` y el stock update se salta. |
@@ -1268,8 +1287,8 @@ Cada fase indica que cambio, los archivos y la version del cache. Commits entre 
 | modal-alerta | `ventas.html#modal-alerta` (`#alerta-titulo`, `#alerta-mensaje`, `#btn-alerta-cerrar`), `mostrarAlertaVenta()`: aviso que NO se cierra solo. |
 | Limpiar Formulario cancela la edicion | `ventas.js`: el handler de `#btn-limpiar` pone `VENTA_EDITANDO_ID = null` (Fase 40). |
 | Orden del historial de ventas | `DB.ventas.listar()` con `orderBy: 'fecha_venta.desc,created_at'` (Fase 41). |
-| Total SKU / Stock Bajo / Agotados | Panel y Reportes: SKU = variante; Stock Bajo = `stock_actual > 0` y `<= stock_min` (2 por defecto); Agotados = `<= 0`; sin productos Digital (Fases 36-37). |
-| Productos Digital excluidos | `DB.select('pos_productos', { select: 'id', filters: [{ col: 'tipo_producto', val: 'Digital' }] })` en `panel.js` y `reportes.js`; si falla, muestran `---`. |
+| Total SKU / Stock Bajo / Agotados | Panel, Reportes e Inventario: SKU = variante; Stock Bajo = `stock_actual > 0` y `<= stock_min` (2 por defecto); Agotados = `<= 0`; sin productos Digital (Fases 36-37 y 42). |
+| Productos Digital excluidos | `DB.select('pos_productos', { select: 'id', filters: [{ col: 'tipo_producto', val: 'Digital' }] })` en `panel.js`, `reportes.js` e `inventario.js`; si falla, muestran `---`. |
 | Conciliacion del acumulador mensual | Consulta en `specs/03-pos-spec.md` §3.6.2; debe devolver solo nov 2025 (ventas importadas desde CSV). |
 | IVA 0% (exento) | `productos.js` y `configuracion.js` respetan el 0; no usar `\|\|` con valor por defecto 0.19 (Fases 32-33). |
 | Buscar orden de compra por Notas | `compras.js::filtrarYRender()` incluye `c.notas` (Fase 38). |
@@ -1565,3 +1584,18 @@ Cada fase indica que cambio, los archivos y la version del cache. Commits entre 
 | `AGENTS.md` | Seccion 5: reglas nuevas. Seccion 7.2: Fases 30 a 41. Seccion 7.3: pendientes. Seccion 10: corregida (config.js va en el repositorio, sin `service_role`). Seccion 11: keywords. Este changelog. |
 | `specs/03-pos-spec.md` | Subsecciones nuevas 3.1.4, 3.1.5, 3.4.5, 3.6.2 y 3.7.3; correcciones en 3.1.1, 3.3.2, 3.3.3, 3.3.4, 4.1.1, 9.4 y 12. |
 | `npm test` | 119 passed, 0 failures |
+
+### 2026-10-21 — Fases 42 a 44
+
+| Archivo | Cambio |
+|---|---|
+| `apps/pos/js/paginas/inventario.js` | Fase 42: `estadoStock()` (agotado `<= 0`, bajo `<= stock_min`, con stock `> stock_min`) usada por tarjetas, filtros y badges; productos `Digital` excluidos (`PRODUCTOS_FISICOS`). |
+| `apps/pos/css/estilo.css` | Fase 43: bloque "Sidebar: columna flexible" (encabezado fijo, lista con scroll, pie fijo). |
+| `apps/pos/js/paginas/configuracion.js` y `apps/pos/configuracion.html` | Fase 44: campo `#campo-wms-url` (`wms_url`). |
+| `apps/pos/js/compartido/database.js` | Fase 44: `cargarLinkTienda()` crea `#link-wms` debajo de `#link-tienda-virtual` (`asegurarLinkWms()`). |
+| `apps/pos/service-worker.js` | Cache `kubit-pos-20261016-11` a `-13`. |
+| `specs/01-schema.sql` y `specs/13-pos-wms-url.sql` | Columna `wms_url text` en `pos_configuracion_empresa`. |
+| **SQL (ejecutado por el usuario)** | `13-pos-wms-url.sql` en QA y en produccion, antes de publicar el codigo de la Fase 44. |
+| `specs/03-pos-spec.md` | Encabezado, diagrama ER y catalogo (`store_url`, `wms_url`), 3.3.3, 3.3.4, 9.4 y la seccion 13 (nuevas 12.5 y 12.6). |
+| `specs/11-api-contracts.md` | 3.12.1 y nueva 3.12.2 (`store_url`, `wms_url`). |
+| `AGENTS.md`, `CLAUDE.md` y `specs/ARCHITECTURE.md` | Secciones 3.1, 5, 7.1, 7.2, 7.3 y 11 (reglas nuevas, Fases 42 a 44, pendiente de Stock Bajo cerrado). El esquema pasa a nombrarse `01-schema.sql` (nombre real en el repositorio; las entradas historicas conservan el nombre antiguo). |

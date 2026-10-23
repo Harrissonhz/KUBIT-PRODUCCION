@@ -2,13 +2,13 @@
 
 > Lista ordenada y atomica. Se toma **una tarea por iteracion**, se implementa, se prueba y se marca.
 > Estados: `[ ]` pendiente · `[x]` hecho · `[~]` implementado, falta prueba · `[!]` bloqueado o diferido.
-> Ultima actualizacion: 2026-10-07 (listo para produccion, plan v6).
+> Ultima actualizacion: 2026-10-21 (T-523, mejora M1 en Configuracion).
 
 ## Epica 0 — Estructura del modulo (sin build) — ✅ Fase A
 - [x] T-001 `index.html` redirige a `login.html`; diagnostico en `diagnostico.html`.
 - [x] T-002 `js/config.js` (pruebas) + `js/supabase.js` (copia exacta del POS).
 - [x] T-003 `js/compartido/auth.js`: copia sin cambios del POS.
-- [x] T-004 `manifest.json` + `service-worker.js` + `.vercelignore`. Cache vigente: `kubit-wms-20261006-02`.
+- [x] T-004 `manifest.json` + `service-worker.js` + `.vercelignore`. Cache vigente: `kubit-wms-20261021-01` (M1).
 - [x] T-005 `layout.js` + `css/wms.css`. Todo el menu disponible desde C3.
 - [x] T-006 `login.html` + `login.js`. Destino tras el login: Buscar (PN1).
 - [x] T-007 `css/estilo.css`: copia sin cambios del POS.
@@ -36,6 +36,7 @@
 
 ## Epica 4 — Capa de datos + pantallas
 - [x] Fase A (2026-10-01) · [x] Fase B (2026-10-02) · [x] Fase C (2026-10-06): T-440 a T-444.
+- [~] **T-523** M1 Configuracion (`config.html`, `js/paginas/config.js`, `css/wms.css`): puestos colapsados por defecto (CF1), Expandir/Colapsar todo, buscador por codigo, Editar abre el puesto, contenedores libres en verde punteado y "N libres" (CF2). Probado en navegador con datos simulados (27 pruebas); falta prueba del usuario en pruebas y produccion.
 - Mejoras opcionales: [ ] T-412 enlace Ubicar desde Buscar · [ ] T-516 enlace Trasladar · [ ] T-519 enlace Contar.
 - Reglas: navegacion (`disponible: true` + `ASSETS`), formato V1, fechas Z1, solo lectura CR1, verificacion I-1.
 

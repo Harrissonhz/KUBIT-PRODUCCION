@@ -459,6 +459,7 @@ create table public.pos_configuracion_empresa (
   logo_url text,
   mensaje_legal text,
   store_url text,
+  wms_url text,
   deleted_at timestamptz
 );
 

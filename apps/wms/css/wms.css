@@ -75,3 +75,37 @@ body.wms-sin-scroll {
   opacity: 1;
   pointer-events: auto;
 }
+
+/* ---------- M1: Configuracion — puestos colapsables y contenedores libres ---------- */
+.wms-toggle {
+  -webkit-tap-highlight-color: transparent;
+  min-height: 2.75rem;             /* area tactil comoda */
+}
+.wms-chevron {
+  transition: transform .15s ease;
+}
+.wms-chevron-abierto {
+  transform: rotate(90deg);
+}
+/* Bolsa, caja o zona suelta sin unidades ubicadas ni reservadas (CF2) */
+.wms-libre {
+  background-color: transparent;
+  border-color: rgba(16, 185, 129, .7) !important;
+  border-style: dashed !important;
+  color: #047857;
+}
+.dark .wms-libre {
+  color: #6ee7b7;
+}
+.wms-pill-libre {
+  background-color: rgba(16, 185, 129, .12);
+  border: 1px solid rgba(16, 185, 129, .35);
+  color: #047857;
+}
+.dark .wms-pill-libre {
+  color: #6ee7b7;
+}
+/* Contenedor encontrado con el buscador */
+.wms-resaltado {
+  box-shadow: 0 0 0 2px #0ea5e9;
+}

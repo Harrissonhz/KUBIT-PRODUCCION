@@ -11,7 +11,8 @@
 │
 ├── specs/                        ← Spec-Driven Development: fuente de verdad
 │   ├── 01-master-spec.md         ← Visión general, branding, reglas del SaaS
-│   ├── 02-database-schema.sql    ← DDL completo (35 tablas con grants, RLS, índices, triggers)
+│   ├── 01-schema.sql             ← DDL completo (35 tablas con grants, RLS, índices, triggers). En documentos antiguos aparece como 02-database-schema.sql
+│   ├── 13-pos-wms-url.sql        ← Fase 44: columna wms_url en pos_configuracion_empresa (ya incluida en 01-schema.sql)
 │   ├── 03-pos-spec.md            ← Especificación del módulo POS
 │   ├── 04-store-spec.md          ← Especificación del módulo Tienda Virtual
 │   ├── 05-ui-ux-system.md        ← Sistema de diseño UI/UX

@@ -1,7 +1,7 @@
 # plan.md — Plan tecnico de implementacion Kubit-WMS (MVP)
 
 > **Como.** Arquitectura, estructura y decisiones tecnicas derivadas de `07-wms-spec.md` (v11), `constitution.md` y el **AGENTS.md raiz de Kubit**.
-> Ultima actualizacion: 2026-10-06 (paso C4, cierre de la Fase C) — estructura final del MVP, funciones (19), capa de datos y decisiones de pantalla de la Fase C.
+> Ultima actualizacion: 2026-10-21 (mejora M1: Configuracion con puestos colapsables y contenedores libres, CF1 y CF2). Anterior: 2026-10-06 (paso C4, cierre de la Fase C).
 
 ## 1. Stack (confirmado en Kubit — no reabrir)
 - **Frontend:** HTML semantico + **Tailwind CSS via CDN** + **JavaScript vanilla** (IIFE por pagina). Sin SPA, sin TypeScript, sin build. Fuente Poppins.
@@ -28,7 +28,7 @@
   ├── buscar.html · ubicar.html · config.html                          # Fase A
   ├── despachar.html · traslados.html · panel.html                     # Fase B
   ├── ajustes.html · inventario.html · reconciliacion.html             # Fase C
-  ├── manifest.json · service-worker.js (vigente: 20261006-02)
+  ├── manifest.json · service-worker.js (vigente: 20261021-01)
   ├── css/ estilo.css (copia del POS) · wms.css
   ├── img/
   └── js/
@@ -77,7 +77,7 @@ Formato `B CC PP` (`07-wms-spec.md` §15). Solo se ubica, traslada, cuenta o des
 - **Contrato de pagina protegida:** `<body data-pagina data-titulo>`, `<main id="contenido" class="invisible">`; scripts `config` → `supabase` → `database` → `auth` → `layout` → (`fecha`) → (`ubicacion-vista`) → pagina.
 - **Menu:** barra inferior (Buscar · Ubicar · Despachar · Mas); "Mas" con Traslados, Panel, Inventario, Reconciliacion, Bajas y ajustes, Configuracion. **Todo disponible** desde C3.
 - **Z1** fechas en America/Bogota; **V1** formato de ubicacion; **CR1** ninguna pantalla crea ajustes ni bajas.
-- Decisiones de pantalla: U1 (Ubicar), DB1/DB2 (Despachar), T1/T2/T3 (Traslados), PN1/PN2 (Panel), AJ1 (Bajas y ajustes), IN1/IN2/IN3 (Inventario), RC1 (Reconciliacion: solo lectura, causa y enlace; diferencia como POS − WMS en todas las pantallas).
+- Decisiones de pantalla: U1 (Ubicar), DB1/DB2 (Despachar), T1/T2/T3 (Traslados), PN1/PN2 (Panel), AJ1 (Bajas y ajustes), IN1/IN2/IN3 (Inventario), RC1 (Reconciliacion: solo lectura, causa y enlace; diferencia como POS − WMS en todas las pantallas), CF1/CF2 (Configuracion: puestos colapsados por defecto, buscador y contenedores libres en verde punteado; 07-wms-spec.md §7.5).
 
 ## 8. Pruebas
 Pruebas manuales por paso en `fix_plan.md` (todas aprobadas al 2026-10-06) y pruebas con datos simulados en Node antes de cada entrega. Pendientes: automatizadas (T-201, T-508, T-309).
@@ -90,6 +90,7 @@ Pruebas manuales por paso en `fix_plan.md` (todas aprobadas al 2026-10-06) y pru
 | A — Base y ubicacion | A0–A8, V1 | ✅ 2026-10-01 |
 | B — Operacion diaria | B0–B7 (Despachar, Traslados, Panel) | ✅ 2026-10-02 |
 | C — Control | C0 (`10`), C1 (Bajas y ajustes), C2 (`11`, Inventario), C3 (Reconciliacion), C4 (cierre) | ✅ 2026-10-06 (C4: publicacion pendiente del usuario) |
+| Mejoras | M1 Configuracion: puestos colapsables y libres (CF1, CF2), sin cambios en base de datos | ⏳ 2026-10-21, en prueba |
 | Produccion | `despliegue-produccion.md` v4 | Sin fecha |
 | Posterior | D2 (anulaciones), RC2/T-521, T-515, endurecimiento (Epica 5) | Por priorizar |
 

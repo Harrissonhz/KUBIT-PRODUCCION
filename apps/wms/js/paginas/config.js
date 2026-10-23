@@ -18,6 +18,16 @@
      - No se desactiva un contenedor con mercancia ubicada o reservada.
      - Desactivar un puesto desactiva su contenido; activarlo lo reactiva.
      - Un contenido no se activa si su puesto esta inactivo.
+
+   M1 (2026-10-21) — vista de puestos:
+     CF1 Los puestos se muestran colapsados SIEMPRE al abrir la pantalla y al
+         cambiar de bodega (el estado no se guarda). Se abren solos al buscar
+         un codigo, al crear su contenido o al tocar "Editar" del puesto.
+     CF2 Bolsa, caja o zona suelta LIBRE = activa y sin unidades UBICADAS ni
+         RESERVADAS (lo reservado sigue fisicamente en el contenedor). Se pinta
+         en verde con borde punteado; el encabezado muestra "N libres".
+         Solo lectura de wms_v_stock_detalle (CR1). Si la lectura falla no se
+         marca nada como libre y se avisa en el resumen.
    ============================================================ */
 (function () {
   if (!window.WMSLayout) return;
@@ -50,6 +60,14 @@
   var bodegaActual = null;
   var ubicaciones = [];
   var ocupado = false;
+
+  // M1: estado de la vista (solo en memoria: al recargar todo vuelve a colapsado, CF1)
+  var abiertos = {};        // id de puesto -> true si esta expandido
+  var conStock = {};        // id de contenedor -> true si tiene unidades UBICADAS o RESERVADAS
+  var stockOk = false;      // false si no se pudo leer el contenido (no se marcan libres)
+  var LOTE_IDS = 80;        // ids por consulta (evita URLs demasiado largas)
+  var elBuscar = $('buscar-puesto');
+  var elBuscarMsg = $('buscar-msg');
 
   /* ---------- Utilidades ---------- */
   function esc(v) {
@@ -130,6 +148,8 @@
     if (!b) return;
     bodegaActual = bodegas.filter(function (x) { return x.id === b.getAttribute('data-bodega'); })[0];
     localStorage.setItem('wms_config_bodega', bodegaActual.codigo);
+    abiertos = {};   // CF1: al cambiar de bodega todo vuelve a colapsado
+    limpiarBuscador();
     cerrarPanelBodega();
     pintarBodegas();
     cargarUbicaciones();
@@ -209,15 +229,40 @@
       return;
     }
     ubicaciones = res.data || [];
+    await cargarContenido();
     pintarLista();
     sugerirPuesto();
+  }
+
+  // M1 (CF2): marca que contenedores tienen unidades UBICADAS o RESERVADAS.
+  // Solo lectura de wms_v_stock_detalle, por lotes de ids.
+  async function cargarContenido() {
+    conStock = {};
+    stockOk = false;
+    var ids = ubicaciones.filter(function (u) { return !esPuesto(u); }).map(function (u) { return u.id; });
+    if (!ids.length) { stockOk = true; return; }
+    for (var i = 0; i < ids.length; i += LOTE_IDS) {
+      var r = await DB.wms.stockEnUbicaciones(ids.slice(i, i + LOTE_IDS));
+      if (r.error) { conStock = {}; return; }
+      (r.data || []).forEach(function (f) {
+        if ((f.estado_fase === 'UBICADO' || f.estado_fase === 'RESERVADO') && (Number(f.cantidad) || 0) > 0) {
+          conStock[f.ubicacion_id] = true;
+        }
+      });
+    }
+    stockOk = true;
+  }
+
+  function esLibre(h) {
+    return stockOk && h.activo !== false && !conStock[h.id];
   }
 
   function pintarLista() {
     var ps = puestos();
     var cuenta = function (t) { return ubicaciones.filter(function (u) { return u.tipo === t; }).length; };
     elResumen.textContent = cuenta('CANASTILLA') + ' canastillas · ' + cuenta('ENTREPANO') + ' entrepanos · ' +
-      (ps.length) + '/99 puestos';
+      (ps.length) + '/99 puestos' +
+      (stockOk ? '' : ' · No se pudo leer el contenido: no se marcan libres');
 
     if (!ps.length) {
       elLista.innerHTML =
@@ -235,16 +280,32 @@
     var inactivo = p.activo === false;
     var internos = hijos(p).sort(function (a, b) { return a.codigo.localeCompare(b.codigo); });
     var tipoContenido = CONTENIDO_DE[p.tipo];
+    var abierto = !!abiertos[p.id];
+
+    var nCont = internos.filter(function (h) { return h.tipo !== 'SUELTO'; }).length;
+    var nSuelto = internos.length - nCont;
+    var nLibres = internos.filter(esLibre).length;
+    var nombreCont = ETIQUETA[tipoContenido].toLowerCase();
+    var resumenTxt = internos.length
+      ? nCont + ' ' + (nCont === 1 ? nombreCont : nombreCont + 's') +
+        (nSuelto ? ' · ' + nSuelto + (nSuelto === 1 ? ' suelta' : ' sueltas') : '')
+      : 'Sin contenido';
 
     var chips = internos.length
       ? '<div class="mt-3 flex flex-wrap gap-2">' + internos.map(function (h) {
           var esSuelto = h.tipo === 'SUELTO';
-          return '<button type="button" data-editar="' + esc(h.id) + '" title="Editar ' + esc(h.codigo) + '" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium ' +
-            (esSuelto
-              ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
-              : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200') +
-            (h.activo === false ? ' opacity-50 line-through' : '') + '">' +
+          var libre = esLibre(h);
+          var clases = libre
+            ? 'wms-libre'
+            : (esSuelto
+                ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
+                : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200');
+          return '<button type="button" data-editar="' + esc(h.id) + '" data-codigo-chip="' + esc(h.codigo) + '" title="' +
+            (libre ? 'Libre - ' : '') + 'Editar ' + esc(h.codigo) + '" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border border-transparent ' +
+            clases + (h.activo === false ? ' opacity-50 line-through' : '') + '">' +
+            (libre ? '<span aria-hidden="true">&#9675;</span>' : '') +
             esc(h.codigo) + '<span class="opacity-70">' + (esSuelto ? 'Suelto' : ETIQUETA[h.tipo]) +
+            (libre ? ' libre' : '') +
             (h.nombre ? ' · ' + esc(h.nombre) : '') + '</span></button>';
         }).join('') + '</div>'
       : '<p class="mt-3 text-xs text-slate-500 dark:text-slate-400">Sin contenido.</p>';
@@ -256,21 +317,101 @@
           '<button type="button" data-agregar="SUELTO" class="' + C_BTN_SEC + ' font-medium">+ Zona suelta</button>' +
         '</div>';
 
+    var idCuerpo = 'cuerpo-' + esc(p.id);
     return '<article class="bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 rounded-xl p-4' + (inactivo ? ' opacity-70' : '') + '" data-puesto="' + esc(p.id) + '">' +
-        '<div class="flex items-start justify-between gap-3">' +
-          '<div class="min-w-0">' +
-            '<p class="text-base font-semibold tracking-wider">' + esc(p.codigo) + '</p>' +
-            '<p class="text-xs text-slate-500 dark:text-slate-400">' + ETIQUETA[p.tipo] + ' ' + dos(numeroCC(p.codigo)) +
-              (p.nombre ? ' · ' + esc(p.nombre) : '') + '</p>' +
-          '</div>' +
+        '<div class="flex items-center justify-between gap-2">' +
+          '<button type="button" data-toggle aria-expanded="' + abierto + '" aria-controls="' + idCuerpo + '" class="wms-toggle flex-1 min-w-0 flex items-center gap-2 text-left -my-1 py-1">' +
+            '<svg class="wms-chevron w-4 h-4 shrink-0 text-slate-400' + (abierto ? ' wms-chevron-abierto' : '') + '" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>' +
+            '<span class="min-w-0">' +
+              '<span class="block text-base font-semibold tracking-wider">' + esc(p.codigo) + '</span>' +
+              '<span class="block text-xs text-slate-500 dark:text-slate-400 truncate">' + ETIQUETA[p.tipo] + ' ' + dos(numeroCC(p.codigo)) +
+                (p.nombre ? ' · ' + esc(p.nombre) : '') + '</span>' +
+            '</span>' +
+            '<span class="ml-auto flex items-center gap-1.5 shrink-0">' +
+              '<span class="hidden sm:inline-flex px-2 py-0.5 rounded-full text-[11px] bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">' + resumenTxt + '</span>' +
+              (nLibres ? '<span class="wms-pill-libre px-2 py-0.5 rounded-full text-[11px]">' + nLibres + (nLibres === 1 ? ' libre' : ' libres') + '</span>' : '') +
+            '</span>' +
+          '</button>' +
           '<div class="flex items-center gap-2 shrink-0">' +
             (inactivo ? '<span class="px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300">Inactivo</span>' : '') +
             '<button type="button" data-editar="' + esc(p.id) + '" class="px-3 py-1.5 rounded-lg text-xs border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">Editar</button>' +
           '</div>' +
         '</div>' +
-        chips + botones +
+        '<div id="' + idCuerpo + '" data-cuerpo' + (abierto ? '' : ' class="hidden"') + '>' +
+          chips + botones +
+        '</div>' +
         '<div data-panel class="hidden"></div>' +
       '</article>';
+  }
+
+  /* ---------- M1: expandir / colapsar ---------- */
+  function fijarAbierto(art, abrir) {
+    if (!art) return;
+    var id = art.getAttribute('data-puesto');
+    if (abrir) abiertos[id] = true; else delete abiertos[id];
+    var cuerpo = art.querySelector('[data-cuerpo]');
+    var btn = art.querySelector('[data-toggle]');
+    var chev = art.querySelector('.wms-chevron');
+    if (cuerpo) cuerpo.classList.toggle('hidden', !abrir);
+    if (btn) btn.setAttribute('aria-expanded', abrir ? 'true' : 'false');
+    if (chev) chev.classList.toggle('wms-chevron-abierto', abrir);
+  }
+  function articuloDe(id) {
+    return elLista.querySelector('[data-puesto="' + id + '"]');
+  }
+  function todos(abrir) {
+    Array.prototype.forEach.call(elLista.querySelectorAll('[data-puesto]'), function (art) { fijarAbierto(art, abrir); });
+  }
+  var btnExpandir = $('btn-expandir-todo');
+  var btnColapsar = $('btn-colapsar-todo');
+  if (btnExpandir) btnExpandir.addEventListener('click', function () { todos(true); });
+  if (btnColapsar) btnColapsar.addEventListener('click', function () { todos(false); });
+
+  /* ---------- M1: ir a puesto o contenedor ---------- */
+  function limpiarBuscador() {
+    if (elBuscar) elBuscar.value = '';
+    if (elBuscarMsg) { elBuscarMsg.textContent = ''; elBuscarMsg.classList.add('hidden'); }
+  }
+  function mensajeBuscar(t) {
+    if (!elBuscarMsg) return;
+    elBuscarMsg.textContent = t;
+    elBuscarMsg.classList.toggle('hidden', !t);
+  }
+  function irACodigo(texto) {
+    var c = soloDigitos(texto, 5);
+    mensajeBuscar('');
+    if (c.length < 3 || !bodegaActual) return;
+    // 3 digitos (B CC) = puesto; 5 digitos = puesto o contenedor
+    var codigo = c.length === 3 ? c + '00' : c;
+    if (c.length === 4) return;
+    if (codigo.charAt(0) !== String(bodegaActual.codigo)) {
+      mensajeBuscar('El codigo ' + codigo + ' es de la bodega ' + codigo.charAt(0) + '.');
+      return;
+    }
+    var u = ubicaciones.filter(function (x) { return x.codigo === codigo; })[0];
+    if (!u) { mensajeBuscar('No existe el codigo ' + codigo + ' en esta bodega.'); return; }
+    var puesto = esPuesto(u) ? u : porId(u.parent_id);
+    if (!puesto) { mensajeBuscar('No existe el codigo ' + codigo + ' en esta bodega.'); return; }
+    var art = articuloDe(puesto.id);
+    fijarAbierto(art, true);
+    if (art) art.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (!esPuesto(u) && art) {
+      var chip = art.querySelector('[data-codigo-chip="' + codigo + '"]');
+      if (chip) {
+        chip.classList.add('wms-resaltado');
+        setTimeout(function () { chip.classList.remove('wms-resaltado'); }, 2500);
+      }
+    }
+  }
+  if (elBuscar) {
+    elBuscar.addEventListener('input', function () {
+      this.value = soloDigitos(this.value, 5);
+      var v = this.value;
+      if (v.length === 5 || v.length === 3) irACodigo(v); else mensajeBuscar('');
+    });
+    elBuscar.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); irACodigo(this.value); }
+    });
   }
 
   /* ---------- Nuevo puesto ---------- */
@@ -323,6 +464,12 @@
 
   /* ---------- Acciones dentro de las tarjetas ---------- */
   elLista.addEventListener('click', function (e) {
+    var toggle = e.target.closest('[data-toggle]');
+    if (toggle) {
+      var artT = toggle.closest('[data-puesto]');
+      fijarAbierto(artT, !abiertos[artT.getAttribute('data-puesto')]);
+      return;
+    }
     if (ocupado) return;
     var agregar = e.target.closest('[data-agregar]');
     if (agregar) { abrirPanelAgregar(agregar); return; }
@@ -430,6 +577,7 @@
   function abrirPanelEditar(btn) {
     var u = porId(btn.getAttribute('data-editar'));
     var art = btn.closest('[data-puesto]');
+    fijarAbierto(art, true);   // M1: el formulario se ve aunque el puesto estuviera colapsado
     var activo = u.activo !== false;
     var aviso = esPuesto(u)
       ? 'Desactivar el puesto tambien desactiva su contenido. Activarlo lo vuelve a activar.'
@@ -531,6 +679,9 @@
       return false;
     }
     window.mostrarToast(ETIQUETA[datos.tipo] + ' ' + datos.codigo + ' creada', 'success');
+    // M1: el puesto donde se creo (o el puesto nuevo) queda abierto para ver el resultado
+    if (datos.parentId) abiertos[datos.parentId] = true;
+    else if (res.data && res.data.id) abiertos[res.data.id] = true;
     await cargarUbicaciones();
     return true;
   }

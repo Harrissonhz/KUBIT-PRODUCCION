@@ -468,13 +468,23 @@ GET /rest/v1/pos_ventas_detalle
 
 ### 3.12 Configuración Empresa
 
-#### 3.12.1 Obtener configuración (incluye store_url)
+#### 3.12.1 Obtener configuración (incluye store_url y wms_url)
 ```
 GET /rest/v1/pos_configuracion_empresa
   ?deleted_at=is.null
   &limit=1
 ```
-**Implementación en database.js:** `configuracionEmpresa.obtener()` retorna la fila completa incluyendo `store_url`, `logo_url`, `mensaje_legal`, etc.
+**Implementación en database.js:** `configuracionEmpresa.obtener()` retorna la fila completa incluyendo `store_url`, `wms_url`, `logo_url`, `mensaje_legal`, etc. `store_url` y `wms_url` son las URLs de los enlaces "Tienda Virtual" y "WMS" del menú del POS (ver `03-pos-spec.md` §13).
+
+#### 3.12.2 Actualizar configuración (store_url y wms_url)
+```
+PATCH /rest/v1/pos_configuracion_empresa?id=eq.{id}
+{
+  "store_url": "https://tienda.ejemplo.com",
+  "wms_url": "https://wms.ejemplo.com/login.html"
+}
+```
+**Implementación en database.js:** `configuracionEmpresa.guardar(data)`. Los campos vacíos se envían como `null` y el enlace correspondiente del menú se oculta. `wms_url` (Fase 44) debe existir en la tabla (ver `specs/13-pos-wms-url.sql`); si no existe, PostgREST rechaza el PATCH.
 
 ---
 

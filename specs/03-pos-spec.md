@@ -1,6 +1,8 @@
 # Especificación del Módulo POS - Kubit
 
-> **Ultima actualizacion:** 2026-10-18 (Fases 30 a 41): subsecciones 3.1.4, 3.1.5, 3.4.5, 3.6.2 y 3.7.3; correcciones en 3.1.1, 3.3.2 a 3.3.4, 4.1.1, 9.4 y 12.
+> **Ultima actualizacion:** 2026-10-21 (Fases 42 a 44): subsecciones 3.3.3, 3.3.4, 9.4 y 12 (Inventario con la regla unica de stock, menu lateral y enlace al WMS) y modelo de datos (`store_url` y `wms_url` en `pos_configuracion_empresa`).
+>
+> Anterior: 2026-10-18 (Fases 30 a 41): subsecciones 3.1.4, 3.1.5, 3.4.5, 3.6.2 y 3.7.3; correcciones en 3.1.1, 3.3.2 a 3.3.4, 4.1.1, 9.4 y 12.
 
 ## 1. Descripción General
 El módulo **POS (Point of Sale)** es el núcleo transaccional del ecosistema Kubit. Gestiona ventas presenciales, control de caja, inventario, compras, facturación electrónica (DIAN) y finanzas mensuales para PYMES colombianas.
@@ -168,6 +170,8 @@ erDiagram
         string prefijo_facturacion
         text logo_url
         text mensaje_legal
+        text store_url
+        text wms_url
         timestamp deleted_at
     }
 
@@ -519,7 +523,7 @@ erDiagram
 
 | Tabla | Propósito | Tipo |
 |---|---|---|
-| `pos_configuracion_empresa` | Configuración general de la empresa (singleton) | Maestro |
+| `pos_configuracion_empresa` | Configuración general de la empresa (singleton). Incluye `store_url` y `wms_url`, las URLs de los enlaces "Tienda Virtual" y "WMS" del menú (ver 12) | Maestro |
 | `pos_sucursales` | Sucursales o puntos de venta | Maestro |
 | `pos_cajas` | Cajas registradoras físicas/lógicas | Maestro |
 | `pos_metodos_pago` | Catálogo de métodos de pago (Efectivo, Tarjeta, Transferencia, etc.) | Maestro |
@@ -664,7 +668,7 @@ CERRADA → ABIERTA → CERRADA
 8. Los productos con `tipo_producto = 'Digital'` (cursos, domicilio) no son mercancia fisica: se excluyen de los indicadores de inventario (ver 9.4)
 
 #### 3.3.3 Stock Bajo
-Por SKU (variante): **Agotado** cuando `stock_actual <= 0`; **Stock Bajo** cuando `stock_actual > 0` y `stock_actual <= stock_min` (2 si la variante no tiene minimo definido). Panel y Reportes aplican esta regla (ver 9.4). El sistema debe:
+Por SKU (variante): **Agotado** cuando `stock_actual <= 0`; **Stock Bajo** cuando `stock_actual > 0` y `stock_actual <= stock_min` (2 si la variante no tiene minimo definido). Panel, Reportes e Inventario aplican esta regla (ver 9.4 y 3.3.4). El sistema debe:
 - Mostrar una alerta visual en la interfaz de ventas
 - Notificar en el dashboard principal
 
@@ -673,12 +677,12 @@ Las 4 cards del Resumen de Inventario en la pagina `inventario.html` funcionan c
 
 | Card | `data-stat` | Criterio de filtro | Color ring activo |
 |---|---|---|---|
-| Total Productos | `total` | Sin filtro (muestra todos) | slate-400/50 |
-| Con Stock | `con_stock` | `stock_actual > 10` | emerald-400/50 |
-| Stock Bajo | `stock_bajo` | `stock_actual > 0` y `stock_actual <= 10` | amber-400/50 |
-| Agotados | `agotados` | `stock_actual === 0` | red-400/50 |
+| Total Productos | `total` | Sin filtro (muestra todos los SKU fisicos) | slate-400/50 |
+| Con Stock | `con_stock` | `stock_actual > stock_min` (2 si el SKU no tiene minimo) | emerald-400/50 |
+| Stock Bajo | `stock_bajo` | `stock_actual > 0` y `stock_actual <= stock_min` (2 si el SKU no tiene minimo) | amber-400/50 |
+| Agotados | `agotados` | `stock_actual <= 0` | red-400/50 |
 
-> **Nota (2026-10-18):** esta pantalla usa el tope fijo de 10 unidades para "Stock Bajo"; Panel y Reportes usan el minimo de cada SKU (3.3.3). Pendiente unificar.
+> **Nota (Fase 42, 2026-10-20):** esta pantalla usa la misma regla que Panel y Reportes (3.3.3): el minimo de cada SKU, no un tope fijo. Las tres categorias (Con Stock, Stock Bajo y Agotados) son excluyentes y suman el Total de SKU fisicos. Antes de la Fase 42 usaba un tope fijo de 10 unidades (Con Stock `> 10`, Stock Bajo de 1 a 10, Agotados `=== 0`) y contaba los productos `Digital`.
 
 **Comportamiento:**
 1. Click en una card activa el filtro: la card se resalta con `ring-2` del color correspondiente
@@ -691,11 +695,14 @@ Las 4 cards del Resumen de Inventario en la pagina `inventario.html` funcionan c
 
 **Arquitectura:**
 - Variable de estado: `FILTRO_RESUMEN` (null | 'total' | 'con_stock' | 'stock_bajo' | 'agotados')
+- `estadoStock(d)` devuelve `'agotado'`, `'bajo'` u `'ok'` con la regla de la tabla. La usan las 4 tarjetas, los filtros de las tarjetas y el badge (OK / Bajo / Agotado) de cada fila de la tabla, por eso nunca se contradicen
+- `PRODUCTOS_FISICOS` = SKU activos sin productos `Digital` (se leen con `DB.select('pos_productos', { select: 'id', filters: [{ col: 'tipo_producto', val: 'Digital' }] })`). De ahi salen las tarjetas y la tabla. Si esa lectura falla (`DIGITALES_OK = false`), las tarjetas muestran `---` y la tabla muestra todos los SKU activos
+- `PRODUCTOS_DETALLE` conserva todos los SKU activos (incluidos los digitales) y lo usa solo el buscador del Ajuste Manual de stock
 - `obtenerListaFiltrada()` aplica el filtro de resumen PRIMERO, luego el filtro de texto
 - `aplicarFiltroResumen(tipo)` cambia el estado y re-renderiza
 - `actualizarFiltroUI()` maneja el aspecto visual (ring + pill)
 - Los click handlers se adjuntan una sola vez via flag `window._resumenHandlersAttached`
-- Sin cambios en base de datos — todo es client-side sobre `PRODUCTOS_DETALLE`
+- Sin cambios en base de datos — todo es client-side sobre `PRODUCTOS_FISICOS`
 
 **Archivos involucrados:**
 - `apps/pos/inventario.html` — IDs `#card-stat-*`, atributos `data-stat`
@@ -1054,9 +1061,9 @@ Grid 8-columnas responsive (`grid-cols-2 sm:grid-cols-4 lg:grid-cols-8`). Sin fi
 | Agotados | `#kpi-inv-agotados` | `DB.productos.listarConDetalle()` | SKU con `stock_actual <= 0` |
 | Valor Inventario PVP | `#kpi-inv-valor` | `DB.productos.listarConDetalle()` (suma `precio_venta * stock_actual`, solo stock positivo, redondeada a pesos) | Valor del inventario a precio de venta |
 
-**Reglas de los indicadores de inventario (Fases 35 a 37):**
-- Panel y Reportes (pestana Inventario) usan la misma regla por SKU (variante) y muestran los mismos numeros
-- Se excluyen los productos con `tipo_producto = 'Digital'` (leidos con `DB.select('pos_productos', { select: 'id', filters: [{ col: 'tipo_producto', val: 'Digital' }] })`); si esa lectura falla, los cuatro indicadores muestran `---`
+**Reglas de los indicadores de inventario (Fases 35 a 37 y 42):**
+- Panel, Reportes (pestana Inventario) e Inventario (`inventario.html`, Fase 42) usan la misma regla por SKU (variante) y muestran los mismos numeros de Total SKU, Stock Bajo y Agotados
+- Se excluyen los productos con `tipo_producto = 'Digital'` (leidos con `DB.select('pos_productos', { select: 'id', filters: [{ col: 'tipo_producto', val: 'Digital' }] })`); si esa lectura falla, los cuatro indicadores muestran `---` (en Inventario, ademas, la tabla de Existencias sigue mostrando todos los SKU activos)
 - La formula anterior del valor (costo, o `precio_venta / 1.30` si no habia costo) ya no se usa: mezclaba costo con venta y sumaba las unidades de los productos digitales
 
 ### 9.5 Top 5 Productos del Periodo (con filtros)
@@ -1386,7 +1393,7 @@ $('btn-cuenta-cobro').addEventListener('click', function () {
 
 ---
 
-## 13. Enlace a Tienda Virtual desde el POS
+## 13. Enlaces a Tienda Virtual y WMS desde el POS
 
 ### 12.1 Store URL
 La URL de la tienda virtual se configura en `pos_configuracion_empresa.store_url` y se edita desde `configuracion.html` (campo `#campo-store-url`).
@@ -1410,7 +1417,23 @@ El bloque `cargarLinkTienda()` al final de `database.js` busca `#link-tienda-vir
 7. **Herramientas** (colapsable) → Herramientas hub
 8. **Administracion** (colapsable) → Configuracion
 9. **Tienda Virtual** (link directo, target=_blank)
-10. **Cerrar sesion** (link directo, rojo hover)
+10. **WMS** (link directo, target=_blank; Fase 44; solo aparece si `wms_url` tiene una URL valida)
+11. **Cerrar sesion** (link directo, rojo hover)
+
+Los puntos 9 a 11 forman el pie fijo del menu (ver 12.6).
+
+### 12.5 Enlace al WMS (Fase 44)
+- La URL se configura en `pos_configuracion_empresa.wms_url` (`text`, nullable) y se edita desde `configuracion.html` (campo `#campo-wms-url`, "URL WMS (Bodega)"). Cada ambiente guarda la suya
+- `cargarLinkTienda()` (el mismo bloque de 12.2) crea el enlace `#link-wms` debajo de `#link-tienda-virtual` y valida la URL con `normalizarUrlTienda()`: usa la primera direccion si hay varias, agrega `https://` si falta y acepta solo http/https. Si `wms_url` esta vacio o no es valido, el enlace no se muestra (si ya existia, se oculta); si falla la lectura de la configuracion, tampoco aparece
+- El enlace se crea por JavaScript, no esta en el HTML de las paginas: asi no hubo que editar las 17 paginas con menu. Copia la clase CSS de Tienda Virtual, lleva un icono de cubo y el texto "WMS", abre en pestana nueva (`target="_blank" rel="noopener noreferrer"`) y no usa `data-permiso`
+- Base de datos: la columna se agrega con `specs/13-pos-wms-url.sql` (idempotente) y ya esta en `specs/01-schema.sql`. **Debe existir antes de publicar el codigo en un ambiente:** `configuracion.js` envia `wms_url` al guardar y, sin la columna, guardar la Configuracion falla
+- El WMS (`apps/wms`) no usa este campo y sigue leyendo solo tablas `pos_*` y `st_*`
+
+### 12.6 Layout del menu lateral (Fase 43)
+- `<nav id="sidebar">` tiene 3 hijos directos: el encabezado ("Navegacion" y boton cerrar), la lista de grupos y el pie (Tienda Virtual, WMS y Cerrar sesion)
+- `css/estilo.css` (bloque "Sidebar: columna flexible") lo organiza como columna: encabezado fijo, lista con scroll propio y pie fijo. Antes el pie era `absolute bottom-0` y transparente, y con varios grupos abiertos la lista pasaba por detras y se mezclaba con "Tienda Virtual" y "Cerrar sesion"
+- Aplica a las 17 paginas de la raiz de `apps/pos` que tienen menu, sin editar su HTML ni `sidebar.js`. No tienen menu `index.html`, `login.html`, `factura-print.html` ni `cuenta-cobro-print.html`
+- Si se agrega un cuarto bloque al `<nav>`, hay que revisar esos selectores
 
 ---
 

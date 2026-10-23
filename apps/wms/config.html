@@ -87,7 +87,27 @@
     <section>
       <div class="flex items-center justify-between mb-2">
         <p class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Puestos</p>
-        <p id="resumen" class="text-xs text-slate-500 dark:text-slate-400"></p>
+        <p id="resumen" class="text-xs text-slate-500 dark:text-slate-400 text-right"></p>
+      </div>
+      <!-- M1: buscar, expandir/colapsar y leyenda -->
+      <div class="space-y-2 mb-3">
+        <div class="flex gap-2">
+          <input id="buscar-puesto" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="5" autocomplete="off"
+            placeholder="Ir a puesto o contenedor (ej. 10300 o 10393)"
+            class="flex-1 min-w-0 px-3 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 text-base focus:outline-none focus:ring-2 focus:ring-slate-950 dark:focus:ring-white/20">
+        </div>
+        <p id="buscar-msg" class="hidden text-xs text-red-500"></p>
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <div class="flex flex-wrap items-center gap-1.5 text-[11px]" aria-label="Leyenda">
+            <span class="px-2 py-1 rounded-md bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">Con producto</span>
+            <span class="px-2 py-1 rounded-md bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">Suelto</span>
+            <span class="wms-libre px-2 py-1 rounded-md border border-transparent"><span aria-hidden="true">&#9675;</span> Libre</span>
+          </div>
+          <div class="flex gap-2">
+            <button id="btn-expandir-todo" type="button" class="px-3 py-1.5 rounded-lg text-xs border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">Expandir todo</button>
+            <button id="btn-colapsar-todo" type="button" class="px-3 py-1.5 rounded-lg text-xs border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">Colapsar todo</button>
+          </div>
+        </div>
       </div>
       <div id="lista" class="space-y-3"></div>
     </section>

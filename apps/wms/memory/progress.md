@@ -3,6 +3,9 @@
 > Una entrada por paso: fecha · paso/tarea · resumen · prueba. Sin commits salvo peticion explicita (regla 1.4 de Kubit).
 
 ## Plan del paso en curso
+**M1 (T-523) — Configuracion: puestos colapsables y contenedores libres.** Probar en KUBIT-Pruebas y despues en produccion; commit solo con aprobacion.
+
+**Anterior:**
 **Listo para la ventana de produccion** (plan v6 + `produccion/GUIA-DIA-DESPLIEGUE.md`):
 1. A1: Ignored Build Step en los proyectos POS y Tienda de Vercel.
 2. A2–A4: copiar los 5 scripts y `apps/wms` (con `config.js` de produccion) al repositorio de produccion, sin commit.
@@ -60,6 +63,13 @@
 - Entregado: `produccion/GUIA-DIA-DESPLIEGUE.md` (antes de la ventana A1–A4; ventana P0–P6 con cada consulta y valor esperado; rollback; registro), `produccion/P9-rollback.sql` v2 (sin CASCADE, verifica que no quede nada `wms_*`), `despliegue-produccion.md` v6.
 - Nuevo principio 12: no hacer en produccion ventas de prueba para anularlas mientras D2 este pendiente.
 - Pendientes del usuario: A1 (Ignored Build Step), A2–A4 y la fecha de la ventana.
+
+### 2026-10-21 — M1 Configuracion: puestos colapsables y libres (T-523)
+- Pedido del usuario: en el celular habia que desplazarse mucho para llegar a un puesto, y no se distinguian las bolsas y zonas sueltas vacias.
+- Decisiones del usuario: CF1 (puestos colapsados siempre al abrir y al cambiar de bodega, sin guardar el estado) y CF2 (libre = activo y sin unidades UBICADO ni RESERVADO; verde punteado; "N libres" en el encabezado).
+- Archivos: `config.html` (buscador, Expandir/Colapsar todo, leyenda), `js/paginas/config.js` (colapso, buscador, lectura de contenido por lotes), `css/wms.css`, `service-worker.js` (`kubit-wms-20261021-01`). Sin cambios en base de datos ni en `database.js` (usa `stockEnUbicaciones`, solo lectura, CR1).
+- Prueba previa: navegador sin conexion con datos simulados, 27 de 27 (colapsado inicial, abrir/cerrar, expandir/colapsar todo, buscador de 3 y 5 digitos, codigo inexistente y de otra bodega, Editar abre el puesto, crear deja el puesto abierto, reservado y suelto con producto no son libres, falla de lectura sin libres).
+- Pendiente: prueba del usuario en pruebas y en produccion.
 
 ## BLOQUEOS
 - Ninguno. Pendiente A1 (recomendado) y la fecha de la ventana.
