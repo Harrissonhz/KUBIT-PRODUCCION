@@ -1,7 +1,10 @@
-## Especificación del Módulo WMS - Kubit (SDD) — v11
+## Especificación del Módulo WMS - Kubit (SDD) — v12
 
 > **Estado:** **MVP funcional completo en pruebas.** Base de datos (`08`, `09` v2, `10`, `11`) y Fases A, B y C cerradas; publicado en Vercel `kubit-wms-calidad`. Plan de producción documentado, sin fecha.
 > **Ubicación en el repo:** `specs/07-wms-spec.md` (el `06` es `06-servicio-correo.md`).
+>
+> **Cambios v12 (2026-10-27):**
+> - **U2 Pendientes por ubicar** en `ubicar.html`: con el buscador vacío lista los SKU con unidades `SIN_UBICAR` (§5.3). Solo frontend: `DB.wms.pendientesUbicar()`, sin SQL nuevo. Caché `kubit-wms-20261027-01`.
 >
 > **Cambios v11 (2026-10-06):**
 > - **Fase C cerrada:** Bajas y ajustes (CR2, AJ1), Inventario (CR3, IN1, IN2, IN3) y Reconciliación (RC1).
@@ -165,6 +168,15 @@ Cada `entrada_compra` suma a `SIN_UBICAR`. No exige ubicar.
 #### 5.3 Ubicación
 `SIN_UBICAR → UBICADO` con el código del contenedor. Sincroniza al abrir y recuerda el último contenedor (U1).
 
+**Pendientes por ubicar (U2):**
+- Con el buscador vacío, Ubicar muestra los SKU con unidades `SIN_UBICAR` (`wms_v_stock_detalle`, `estado_fase = 'SIN_UBICAR'`), ordenados de más a menos unidades (empate por nombre y SKU).
+- Lo reservado por ventas no aparece: la reserva es otra fila con `estado_fase = 'RESERVADO'` y no se resta nada.
+- Una sola zona de recepción: `SIN_UBICAR` no tiene bodega ni ubicación, así que la lista no se agrupa por bodega.
+- Resumen "N SKU · N unidades por ubicar"; 10 tarjetas en pantalla y "Ver más (N)" para el resto. Una sola consulta (tope 1.000 filas, con aviso si se alcanza); sin paginación contra la base.
+- Tocar una tarjeta abre el flujo de ubicar de siempre. Escribir en el buscador busca como antes; limpiarlo vuelve a la lista; "Cambiar producto" la recarga (salen los SKU ya ubicados).
+- SKU eliminados en el POS con unidades `SIN_UBICAR` se muestran con la etiqueta **"Eliminado en el POS"** (las unidades existen físicamente). Los digitales no aparecen (D5).
+- Solo lectura (CR1); ubicar sigue usando `wms_ubicar()`. El parámetro `ubicar.html?q=` abre directo la búsqueda.
+
 #### 5.4 Salida (venta en POS o Tienda — D4)
 Reserva primero de `UBICADO` y luego de `SIN_UBICAR` (todo o nada). Despacho de la **venta completa** (DB1), con casillas de ayuda (DB2). Ventas anuladas bloqueadas y re-verificadas antes de despachar (R-B1).
 
@@ -271,6 +283,7 @@ Uso personal (un admin). Previstos: permisos `wms.*` en `pos_permisos` si otro r
 | Bajas y ajustes: automático sin ubicar; pendiente y resuelto si está ubicado (CR2) | ✅ 2026-10-06 |
 | Inventario: coincide, faltante, mayor desde sin ubicar, sobrante, Ubicar/Descartar, reservado (IN1) | ✅ 2026-10-06 |
 | Reconciliación: causas, enlaces, comparación con SQL | ✅ 2026-10-06 |
+| U2 Pendientes por ubicar: lista, orden, "Ver más", buscar/limpiar, ubicar parcial y total, venta y compra en el POS, `?q=`, celular claro/oscuro | ✅ 2026-10-27 |
 | Anular venta → liberación | ⏸ Diferida (D2) |
 
 ---
@@ -290,6 +303,7 @@ Uso personal (un admin). Previstos: permisos `wms.*` en `pos_permisos` si otro r
 | 49 | **IN3** Conteo con esperado visible y "Coincide" | ✅ 2026-10-06 |
 | 50 | **RC1** Reconciliación de solo lectura; POS − WMS | ✅ 2026-10-06 |
 | 51 | **DP2** Verificación después de cada script; registro por ambiente | ✅ 2026-10-06 |
+| 53 | **U2** Pendientes por ubicar en Ubicar: solo `SIN_UBICAR` libre, lista completa con "Ver más", eliminados en el POS visibles con etiqueta | ✅ 2026-10-27 |
 | 52 | **RC2** Igualar el WMS al POS cuando no hay movimiento que explique la diferencia (solo `wms_*`, T-521) | ⏳ Pendiente de decisión |
 
 **Riesgos abiertos:** R-B1 (T-515); R-C1 doble paso por CR1; R-C2 sesgo del conteo; R-C3 diferencias sin movimiento (RC2).

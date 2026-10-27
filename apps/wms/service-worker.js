@@ -5,7 +5,7 @@
  * cache.addAll() falla y el service worker no se instala.
  * Cada paso que agregue o cambie archivos debe sumarlos aqui y subir la version.
  */
-var CACHE = 'kubit-wms-20261021-01'; // Bump: YYYYMMDD-NN (incrementar NN por cada deploy del mismo dia)
+var CACHE = 'kubit-wms-20261027-01'; // Bump: YYYYMMDD-NN (incrementar NN por cada deploy del mismo dia)
 var ES_LOCAL = self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1';
 var ASSETS = [
   'index.html',

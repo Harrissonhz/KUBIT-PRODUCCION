@@ -1,6 +1,6 @@
 # spec.md — Especificacion funcional Kubit-WMS (MVP)
 
-> **Que y por que.** Derivado de `specs/07-wms-spec.md` **v11**. Referencia funcional del bucle Ralph. Subordinado al AGENTS.md raiz de Kubit.
+> **Que y por que.** Derivado de `specs/07-wms-spec.md` **v12**. Referencia funcional del bucle Ralph. Subordinado al AGENTS.md raiz de Kubit.
 > Ultima actualizacion: 2026-10-06 (paso C4, cierre de la Fase C) — HU-07 Reconciliacion (RC1) aprobada; todas las historias del MVP implementadas salvo HU-05 (diferida).
 
 ## 1. Problema
@@ -23,7 +23,7 @@ Un modulo `apps/wms` que permita: **recibir** (leer del POS), **ubicar**, **busc
 | HU | Historia | Pantalla | Estado |
 |---|---|---|---|
 | HU-01 | Recibir compra (`entrada_compra` → `SIN_UBICAR`) | (sincronizacion) | ✅ 2026-09-29 |
-| HU-02 | Ubicar (`SIN_UBICAR → UBICADO`, mono-SKU, U1) | `ubicar.html` | ✅ 2026-10-01 |
+| HU-02 | Ubicar (`SIN_UBICAR → UBICADO`, mono-SKU, U1) · pendientes por ubicar (U2) | `ubicar.html` | ✅ 2026-10-01 · U2 ✅ 2026-10-27 |
 | HU-03 | Buscar producto (B1, B2, V1) | `buscar.html` | ✅ 2026-10-01 |
 | HU-04 | Despachar venta (DB1, DB2, R-B1, Z1) | `despachar.html` | ✅ 2026-10-01 |
 | HU-05 | Anulacion / edicion de venta (liberar reserva) | — | ⏸ diferida (D2) |
@@ -76,6 +76,7 @@ HTML + Tailwind (CDN) + JavaScript vanilla + Supabase (PostgREST y `rpc()` via e
 | **AJ1** | Bajas y ajustes | Origen elegido de una lista | ✅ 2026-10-06 |
 | **IN1 / IN2 / IN3** | Conteo | Resta lo reservado; Ubicar/Descartar; esperado visible | ✅ 2026-10-06 |
 | **RC1** | Reconciliacion | Solo lectura; explica y enlaza; POS − WMS | ✅ 2026-10-06 |
+| **U2** | Ubicar | Buscador vacio = SKU con unidades `SIN_UBICAR` (sin reservado), mas unidades primero; 10 + "Ver mas"; eliminados en el POS con etiqueta | ✅ 2026-10-27 |
 | **RC2** | Igualar el WMS al POS sin movimiento que lo explique (T-521) | Pendiente de decision del usuario | ⏳ |
 
 ## 10. Riesgos abiertos

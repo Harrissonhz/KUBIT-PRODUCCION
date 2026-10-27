@@ -18,6 +18,8 @@
    C2: registrarConteo devuelve una fila (o_sobrante_pendiente, CR3);
        agrega wms.stockEnContenedor(), wms.conteosAbiertos() y
        wms.cerrarSobrante() (specs/11-wms-conteo-sobrante.sql).
+   U2: agrega wms.pendientesUbicar() (SKU con unidades SIN_UBICAR para
+       la lista de Ubicar; marca los SKU eliminados en el POS).
 
    REGLA CR1: este archivo solo LEE tablas pos_* (GET). Nunca hace
    post/patch/delete sobre pos_* ni st_*.
@@ -474,6 +476,71 @@ window.DB = (function () {
         orderBy: 'producto',
         limit: opts.limite || 200
       });
+    },
+
+    // U2: SKU con unidades SIN_UBICAR (lo RESERVADO es otra fila y no cuenta).
+    // Incluye SKU eliminados en el POS (eliminado = true) porque sus unidades
+    // existen fisicamente. Excluye digitales (D5). Mas unidades primero.
+    // data = [{ id, producto_id, nombre, codigo_interno, codigo_barras,
+    //           stock_actual, atributos, activo, sin_ubicar, eliminado }]
+    // hayMas = true si se alcanzo el tope de filas leidas.
+    pendientesUbicar: async function () {
+      var TOPE = 1000;
+      var LOTE = 100;   // ids por consulta (URL corta)
+      var res = await _selectVista('wms_v_stock_detalle', {
+        select: 'producto_detalle_id,codigo_interno,producto,cantidad',
+        filters: [{ col: 'estado_fase', op: 'eq', val: 'SIN_UBICAR' }],
+        orderBy: 'cantidad',
+        orderDir: 'desc',
+        limit: TOPE
+      });
+      if (res.error) return { data: [], error: res.error, hayMas: false };
+      var filas = res.data || [];
+      var ids = _unicos(filas.map(function (f) { return f.producto_detalle_id; }));
+      var detMap = {};
+      var prodMap = {};
+      var errorDatos = null;
+      try {
+        for (var i = 0; i < ids.length; i += LOTE) {
+          var det = await api.get('pos_productos_detalle?select=' + SEL_DETALLE + ',deleted_at' +
+            '&id=in.(' + ids.slice(i, i + LOTE).join(',') + ')');
+          (det || []).forEach(function (d) { detMap[d.id] = d; });
+        }
+        var idsProd = _unicos(Object.keys(detMap).map(function (k) { return detMap[k].producto_id; }));
+        for (var j = 0; j < idsProd.length; j += LOTE) {
+          var prods = await api.get('pos_productos?select=' + SEL_PRODUCTO + ',deleted_at' +
+            '&id=in.(' + idsProd.slice(j, j + LOTE).join(',') + ')');
+          (prods || []).forEach(function (p) { prodMap[p.id] = p; });
+        }
+      } catch (e) {
+        console.error('[DB] wms.pendientesUbicar error:', e);
+        _manejarAuth(e.message);
+        errorDatos = _mensajeError(e);
+      }
+      var lista = filas.map(function (f) {
+        var d = detMap[f.producto_detalle_id] || {};
+        var p = prodMap[d.producto_id] || {};
+        if (p.tipo_producto === 'Digital') return null;   // D5
+        return {
+          id: f.producto_detalle_id,
+          producto_id: d.producto_id || null,
+          nombre: p.nombre || f.producto || '',
+          codigo_interno: d.codigo_interno || f.codigo_interno || '',
+          codigo_barras: d.codigo_barras || null,
+          stock_actual: d.stock_actual || 0,
+          atributos: d.atributos || null,
+          activo: p.activo !== false,
+          sin_ubicar: Number(f.cantidad) || 0,
+          eliminado: !!(d.deleted_at || p.deleted_at)
+        };
+      }).filter(function (x) { return x && x.sin_ubicar > 0; });
+      lista.sort(function (a, b) {
+        if (a.sin_ubicar !== b.sin_ubicar) return b.sin_ubicar - a.sin_ubicar;
+        var n = (a.nombre || '').localeCompare(b.nombre || '', 'es');
+        if (n !== 0) return n;
+        return (a.codigo_interno || '').localeCompare(b.codigo_interno || '', 'es');
+      });
+      return { data: lista, error: errorDatos, hayMas: filas.length >= TOPE };
     },
 
     stockPorSkus: function (ids) {

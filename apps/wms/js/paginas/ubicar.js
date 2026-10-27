@@ -15,6 +15,11 @@
    El ultimo contenedor usado se recuerda (localStorage) para ubicar
    varios productos seguidos en el mismo lugar (inventario general).
    Parametro opcional: ubicar.html?q=AL048
+   U2: con el buscador vacio se muestran los SKU pendientes por ubicar
+       (DB.wms.pendientesUbicar), mas unidades primero: 10 en pantalla y
+       "Ver mas" para el resto. Escribir busca como antes; limpiar vuelve
+       a la lista. "Cambiar producto" recarga la lista. Los SKU eliminados
+       en el POS se muestran con la etiqueta "Eliminado en el POS".
    ============================================================ */
 (function () {
   if (!window.WMSLayout) return;
@@ -22,6 +27,8 @@
   var LIMITE = 20;
   var ESPERA_MS = 350;
   var CLAVE_ULTIMO = 'wms_ultimo_contenedor';
+  var PAGINA_PENDIENTES = 10;   // U2
+  var LOTE_STOCK = 100;         // U2: ids por consulta de stock
 
   var $ = function (id) { return document.getElementById(id); };
   // Paso 1
@@ -50,6 +57,13 @@
   var consultaCont = 0;    // descarta respuestas viejas de la validacion
   var temporizador = null;
   var ocupado = false;
+  // U2: lista de pendientes por ubicar
+  var modo = 'pendientes';      // 'pendientes' | 'busqueda'
+  var pendientes = [];
+  var pendientesHayMas = false;
+  var pendientesCargados = false;
+  var verTodos = false;
+  var consultaPend = 0;
 
   /* ---------- Utilidades ---------- */
   function esc(v) {
@@ -69,6 +83,12 @@
   function subtitulo(p) {
     return [p.codigo_interno, textoAtributos(p.atributos)].filter(Boolean).map(esc).join(' · ');
   }
+  // U2: etiqueta para SKU eliminados en el POS
+  function etiquetaEliminado(p) {
+    return p && p.eliminado
+      ? '<span class="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">Eliminado en el POS</span>'
+      : '';
+  }
   function sinUbicar(id) {
     return (stockPorSku[id] || []).reduce(function (s, f) {
       return s + (f.estado_fase === 'SIN_UBICAR' ? f.cantidad : 0);
@@ -79,17 +99,25 @@
   }
   function plural(n, uno, varios) { return n + ' ' + (n === 1 ? uno : varios); }
 
-  // Carga el stock de los SKUs y el detalle de sus contenedores
+  // Carga el stock de los SKUs y el detalle de sus contenedores.
+  // U2: consulta por lotes y actualiza solo los SKU pedidos (no borra los
+  // demas), para que la lista de pendientes y la busqueda no se pisen.
   async function cargarStock(ids) {
-    var st = await DB.wms.stockPorSkus(ids);
-    if (st.error) { window.mostrarToast(st.error, 'error'); return false; }
-    stockPorSku = {};
-    (st.data || []).forEach(function (f) {
+    ids = (ids || []).filter(Boolean);
+    var filas = [];
+    for (var i = 0; i < ids.length; i += LOTE_STOCK) {
+      var st = await DB.wms.stockPorSkus(ids.slice(i, i + LOTE_STOCK));
+      if (st.error) { window.mostrarToast(st.error, 'error'); return false; }
+      filas = filas.concat(st.data || []);
+    }
+    ids.forEach(function (id) { delete stockPorSku[id]; });
+    filas.forEach(function (f) {
       (stockPorSku[f.producto_detalle_id] = stockPorSku[f.producto_detalle_id] || []).push(f);
     });
-    var det = await WMSUbicacion.cargar((st.data || []).map(function (f) { return f.ubicacion_id; }));
+    var det = await WMSUbicacion.cargar(filas.map(function (f) { return f.ubicacion_id; }));
     if (det.error) window.mostrarToast(det.error, 'error');
-    mapaUbic = det.data || {};
+    var nuevo = det.data || {};
+    Object.keys(nuevo).forEach(function (k) { mapaUbic[k] = nuevo[k]; });
     return true;
   }
 
@@ -108,6 +136,76 @@
     var pendientes = filas.filter(function (f) { return f.resultado === 'PENDIENTE'; }).length;
     elSync.textContent = 'Sincronizado ' + hora() + (pendientes ? ' · ' + plural(pendientes, 'pendiente', 'pendientes') : '');
     if (input.value.trim().length >= 2) buscar();
+    else cargarPendientes();   // U2: datos frescos despues de sincronizar
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     U2 — Pendientes por ubicar (buscador vacio)
+     ════════════════════════════════════════════════════════════ */
+  function pendientesVigentes() {
+    return pendientes.filter(function (p) { return sinUbicar(p.id) > 0; });
+  }
+
+  async function cargarPendientes() {
+    var n = ++consultaPend;
+    if (!pendientesCargados && modo === 'pendientes') elEstado.textContent = 'Cargando pendientes por ubicar...';
+    var res = await DB.wms.pendientesUbicar();
+    if (n !== consultaPend) return;
+    if (res.error) window.mostrarToast('Pendientes por ubicar: ' + res.error, 'error');
+    if (res.error && !(res.data || []).length) {
+      if (modo === 'pendientes' && !input.value.trim()) {
+        elEstado.textContent = '';
+        elResultados.innerHTML = ayudaHtml;
+      }
+      return;
+    }
+    var datos = res.data || [];
+    // El stock (y "Ya ubicado en") solo se carga para lo que se ve en pantalla
+    var visibles = verTodos ? datos : datos.slice(0, PAGINA_PENDIENTES);
+    await cargarStock(visibles.map(function (p) { return p.id; }));
+    if (n !== consultaPend) return;
+    // Para lo que no se ve aun, se usa la cantidad que trajo la consulta
+    datos.forEach(function (p) {
+      if (!stockPorSku[p.id]) stockPorSku[p.id] = [{ producto_detalle_id: p.id, estado_fase: 'SIN_UBICAR', cantidad: p.sin_ubicar }];
+    });
+    pendientes = datos;
+    pendientesHayMas = !!res.hayMas;
+    pendientesCargados = true;
+    if (modo === 'pendientes' && !input.value.trim() && !sel) mostrarPendientes();
+  }
+
+  function mostrarPendientes() {
+    modo = 'pendientes';
+    lista = pendientesVigentes();
+    if (!pendientesCargados) {
+      elEstado.textContent = 'Cargando pendientes por ubicar...';
+      elResultados.innerHTML = '';
+      return;
+    }
+    if (!lista.length) {
+      elEstado.textContent = '';
+      elResultados.innerHTML =
+        '<div class="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 p-6 text-center">' +
+          '<p class="text-sm font-medium">No hay productos por ubicar</p>' +
+          '<p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Todo el inventario tiene contenedor. Busca un producto para ver donde esta.</p>' +
+        '</div>';
+      return;
+    }
+    var unidades = lista.reduce(function (s, p) { return s + sinUbicar(p.id); }, 0);
+    elEstado.textContent = plural(lista.length, 'SKU', 'SKU') + ' · ' +
+      plural(unidades, 'unidad por ubicar', 'unidades por ubicar') +
+      (pendientesHayMas ? ' · lista incompleta (tope de lectura)' : '');
+    pintarLista();
+  }
+
+  async function verMas() {
+    verTodos = true;
+    var faltan = lista.slice(PAGINA_PENDIENTES).map(function (p) { return p.id; });
+    pintarLista();
+    if (faltan.length) {
+      await cargarStock(faltan);
+      if (modo === 'pendientes' && !sel) mostrarPendientes();
+    }
   }
 
   function programarBusqueda() {
@@ -120,9 +218,14 @@
     clearTimeout(temporizador);
     var texto = input.value.trim();
     var n = ++consulta;
+    if (!texto.length) {      // U2: buscador vacio -> pendientes por ubicar
+      mostrarPendientes();
+      return;
+    }
+    modo = 'busqueda';
     if (texto.length < 2) {
-      elEstado.textContent = texto.length ? 'Escribe al menos 2 caracteres' : '';
-      elResultados.innerHTML = texto.length ? '' : ayudaHtml;
+      elEstado.textContent = 'Escribe al menos 2 caracteres';
+      elResultados.innerHTML = '';
       lista = [];
       return;
     }
@@ -148,7 +251,11 @@
   }
 
   function pintarLista() {
-    elResultados.innerHTML = lista.map(function (p) {
+    // U2: en pendientes se muestran 10 y "Ver mas" para el resto
+    var enPendientes = modo === 'pendientes';
+    var mostrar = enPendientes && !verTodos ? lista.slice(0, PAGINA_PENDIENTES) : lista;
+    var ocultos = lista.length - mostrar.length;
+    elResultados.innerHTML = mostrar.map(function (p) {
       var pend = sinUbicar(p.id);
       var nUbic = ubicados(p.id).length;
       return '<article class="bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 rounded-xl p-4">' +
@@ -156,6 +263,7 @@
             '<div class="min-w-0">' +
               '<p class="text-sm font-medium">' + esc(p.nombre) + '</p>' +
               '<p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5 break-words">' + subtitulo(p) + '</p>' +
+              etiquetaEliminado(p) +
               (nUbic ? '<p class="text-xs text-emerald-700 dark:text-emerald-400 mt-1">Ya ubicado en ' + plural(nUbic, 'contenedor', 'contenedores') + '</p>' : '') +
             '</div>' +
             '<div class="text-right shrink-0">' +
@@ -167,7 +275,10 @@
             ? '<button type="button" data-sku="' + esc(p.id) + '" class="mt-3 w-full py-2.5 rounded-xl bg-slate-950 dark:bg-white text-white dark:text-slate-950 text-sm font-medium hover:bg-slate-800 dark:hover:bg-slate-100 active:scale-[0.98]">Ubicar</button>'
             : '<p class="mt-3 text-xs text-slate-500 dark:text-slate-400">Nada por ubicar.</p>') +
         '</article>';
-    }).join('');
+    }).join('') +
+    (ocultos > 0
+      ? '<button type="button" data-ver-mas class="w-full py-3 rounded-xl border border-slate-200 dark:border-slate-700 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-[0.98]">Ver mas (' + ocultos + ')</button>'
+      : '');
   }
 
   /* ════════════════════════════════════════════════════════════
@@ -191,12 +302,17 @@
     contenedor = null;
     elPaso2.classList.add('hidden');
     elPaso1.classList.remove('hidden');
+    if (modo === 'pendientes') {   // U2: refresca la lista (salen los SKU ya ubicados)
+      mostrarPendientes();
+      cargarPendientes();
+      return;
+    }
     if (lista.length) pintarLista();
   }
 
   function pintarSeleccion() {
     $('sel-nombre').textContent = sel.nombre;
-    $('sel-codigo').innerHTML = subtitulo(sel);
+    $('sel-codigo').innerHTML = subtitulo(sel) + (sel.eliminado ? '<br>' + etiquetaEliminado(sel) : '');
     $('sel-sin-ubicar').textContent = sinUbicar(sel.id);
     var filas = ubicados(sel.id);
     $('sel-ubicaciones').innerHTML = filas.length
@@ -322,7 +438,8 @@
     window.mostrarToast(plural(c, 'unidad ubicada', 'unidades ubicadas') + ' en ' + codigo, 'success');
 
     // Refrescar el stock del producto (y del resto de la lista)
-    await cargarStock(lista.length ? lista.map(function (p) { return p.id; }) : [sel.id]);
+    // U2: en la lista de pendientes solo se refresca el producto elegido
+    await cargarStock(modo === 'busqueda' && lista.length ? lista.map(function (p) { return p.id; }) : [sel.id]);
     inCantidad.value = String(sinUbicar(sel.id));
     pintarSeleccion();
     validarContenedor();   // el contenedor mono-SKU ahora queda asignado a este producto
@@ -340,6 +457,7 @@
     input.focus();
   });
   elResultados.addEventListener('click', function (e) {
+    if (e.target.closest('[data-ver-mas]')) { verMas(); return; }   // U2
     var b = e.target.closest('[data-sku]');
     if (b) seleccionar(b.getAttribute('data-sku'));
   });
@@ -362,5 +480,6 @@
   }
   sincronizar();          // si hay texto, al terminar vuelve a buscar con datos frescos
   if (q) buscar();
+  else { mostrarPendientes(); cargarPendientes(); }   // U2: lista sin esperar la sincronizacion
   if (!q && window.matchMedia('(min-width: 1024px)').matches) input.focus();
 })();
