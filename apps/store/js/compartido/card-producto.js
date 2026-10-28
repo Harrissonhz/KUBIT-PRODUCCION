@@ -56,6 +56,13 @@ function CardProducto(producto) {
 
   const badges = obtenerBadges(producto);
   const esAgotado = badges.some(function(b) { return b.tipo === 'agotado'; });
+  // T1 (ST-25): con variantes, el cliente elige la opcion en la ficha
+  const conVariantes = (producto.variantes || []).length > 0;
+  const textoBoton = esAgotado ? 'Agotado' : (conVariantes ? 'Elegir opción' : 'Agregar');
+  // T1 (ST-28): "Desde $X" cuando las variantes tienen precios distintos
+  const precioHtml = producto.preciosDistintos
+    ? '<span class="text-slate-400">Desde ' + formatearMoneda(producto.precioMin) + '</span>'
+    : renderPrecio(producto);
   const badgesHtml = badges.length
     ? `<div class="absolute top-2 left-2 flex flex-col gap-1.5 z-10">${badges.map(renderBadge).join('')}</div>`
     : '';
@@ -73,13 +80,13 @@ function CardProducto(producto) {
       <a href="producto.html?slug=${producto.slug}">
         <h3 class="text-sm font-medium text-slate-900 leading-tight truncate hover:underline">${producto.nombre}</h3>
       </a>
-      <p class="text-sm mt-1">${renderPrecio(producto)}</p>
+      <p class="text-sm mt-1">${precioHtml}</p>
       <button class="btn-agregar mt-2 w-full py-2 text-sm font-medium rounded-md transition-colors ${esAgotado ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-slate-950 text-white hover:bg-slate-800'}"
               data-producto-id="${producto.id}"
               data-producto-nombre="${producto.nombre}"
               data-producto-precio="${producto.precio}"
               data-producto-imagen="${producto.imagen}"${esAgotado ? ' disabled' : ''}>
-        ${esAgotado ? 'Agotado' : 'Agregar'}
+        ${textoBoton}
       </button>
     </div>
   `;
@@ -87,6 +94,10 @@ function CardProducto(producto) {
   $inner.querySelector('.btn-agregar').addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
+    if (conVariantes) {
+      window.location.href = 'producto.html?slug=' + encodeURIComponent(producto.slug);
+      return;
+    }
     agregarAlCarrito(producto);
   });
 
@@ -115,13 +126,44 @@ function agregarAlCarrito(producto, opts) {
     return;
   }
 
-  const detalleId = opts.detalleId || producto.detalleId || null;
-  const variante = opts.variante || null;
-  const codigo = opts.codigo || producto.codigo_interno || null;
+  // T1 (ST-01/02/03/26): cada linea del carrito es una variante (detalleId)
+  // con su propio precio. Con variantes, la variante elegida es obligatoria.
+  var varSel = null;
+  if (tieneVariantes) {
+    varSel = (producto.variantes || []).find(function(v) { return v.id === opts.detalleId; }) || null;
+    if (!varSel) {
+      Modal({
+        titulo: 'Elige una opción',
+        contenido: '<p class="text-sm text-slate-600">Selecciona la presentación que deseas antes de agregar al carrito.</p>'
+      });
+      return;
+    }
+    if ((varSel.stock || 0) <= 0) {
+      Modal({
+        titulo: 'Opción agotada',
+        contenido: '<p class="text-sm text-slate-600">Esta presentación no está disponible por el momento. Elige otra opción.</p>'
+      });
+      return;
+    }
+  }
 
-  const carrito = JSON.parse(localStorage.getItem('kubit_carrito') || '[]');
+  const detalleId = varSel ? varSel.id : (producto.detalleId || null);
+  if (!detalleId) {
+    Modal({
+      titulo: 'No se pudo agregar',
+      contenido: '<p class="text-sm text-slate-600">Este producto no está disponible en este momento.</p>'
+    });
+    return;
+  }
+  const variante = varSel ? varSel.nombre : null;
+  const codigo = varSel ? (varSel.codigo_interno || null) : (producto.codigo_interno || null);
+  const precio = varSel ? (varSel.precio || 0) : (producto.precio || 0);
+
+  var carrito;
+  try { carrito = JSON.parse(localStorage.getItem('kubit_carrito') || '[]'); } catch (err) { carrito = []; }
+  if (!Array.isArray(carrito)) carrito = [];
   const existente = carrito.find(function(item) {
-    return item.productoId === producto.id && (detalleId ? item.detalleId === detalleId : true);
+    return item.detalleId === detalleId;
   });
 
   if (existente) {
@@ -133,7 +175,7 @@ function agregarAlCarrito(producto, opts) {
       nombre: producto.nombre,
       variante: variante,
       codigo: codigo,
-      precio: producto.precio,
+      precio: precio,
       imagen: producto.imagen,
       cantidad: 1
     });
@@ -150,7 +192,7 @@ function agregarAlCarrito(producto, opts) {
         <div>
           <p class="text-sm font-medium text-slate-900">${producto.nombre}</p>
           ${variante ? '<p class="text-xs text-slate-400">' + variante + '</p>' : ''}
-          <p class="text-sm text-slate-500">${formatearMoneda(producto.precio)}</p>
+          <p class="text-sm text-slate-500">${formatearMoneda(precio)}</p>
         </div>
       </div>
       <a href="carrito.html" class="block w-full text-center px-4 py-2 text-sm font-medium bg-slate-950 text-white rounded-lg hover:bg-slate-800 transition-colors mb-2">Ir al carrito</a>

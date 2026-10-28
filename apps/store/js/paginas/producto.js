@@ -1,3 +1,10 @@
+// T1: escape de texto para nombres de variantes
+function escHtml(t) {
+  return String(t == null ? '' : t).replace(/[&<>"']/g, function(c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   var _lightboxImagenes = [];
   var _lightboxIndice = 0;
@@ -100,41 +107,58 @@ document.addEventListener('DOMContentLoaded', async () => {
       const $lista = document.getElementById('variantes-lista');
       $variantes.classList.remove('hidden');
 
-      let seleccionada = null;
-      $lista.innerHTML = producto.variantes.map((v, i) => `
-        <button class="px-4 py-2 text-sm rounded-lg border transition-all
-          ${i === 0 ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200 text-slate-600 hover:border-slate-950'}"
-          data-variante-id="${v.id}" data-variante-nombre="${v.nombre}">
-          ${v.nombre} ${v.stock <= 5 ? '<span class="text-red-400 text-[10px] ml-1">!</span>' : ''}
-        </button>
-      `).join('');
-      seleccionada = producto.variantes[0].id;
+      // T1 (ST-03/26): variantes agotadas deshabilitadas, precio por variante
+      const $precio = document.getElementById('producto-precio');
+      const $btnAgregar = document.getElementById('btn-agregar');
+      const primeraConStock = producto.variantes.find(function(v) { return (v.stock || 0) > 0; }) || null;
+      let seleccionada = primeraConStock ? primeraConStock.id : null;
+
+      const CLS_ACTIVA = ['border-slate-950', 'bg-slate-950', 'text-white'];
+      const CLS_NORMAL = ['border-slate-200', 'text-slate-600', 'hover:border-slate-950'];
+
+      $lista.innerHTML = producto.variantes.map(function(v) {
+        var agotada = (v.stock || 0) <= 0;
+        var activa = v.id === seleccionada;
+        var cls = agotada
+          ? 'border-slate-200 text-slate-300 line-through cursor-not-allowed'
+          : (activa ? CLS_ACTIVA.join(' ') : CLS_NORMAL.join(' '));
+        return '<button type="button" class="px-4 py-2 text-sm rounded-lg border transition-all ' + cls + '"' +
+          ' data-variante-id="' + v.id + '"' + (agotada ? ' disabled aria-disabled="true" title="Agotado"' : '') + '>' +
+          escHtml(v.nombre) +
+          (agotada
+            ? ' <span class="no-underline text-[10px] ml-1">Agotado</span>'
+            : (v.stock <= 5 ? '<span class="text-red-400 text-[10px] ml-1">!</span>' : '')) +
+          '</button>';
+      }).join('');
+
+      function pintarPrecioVariante() {
+        var v = producto.variantes.find(function(x) { return x.id === seleccionada; });
+        if (v) {
+          $precio.innerHTML = renderPrecio({ precio: v.precio, precio_original: v.precio_original });
+        } else if (producto.preciosDistintos) {
+          $precio.innerHTML = '<span class="text-slate-400">Desde ' + formatearMoneda(producto.precioMin) + '</span>';
+        }
+        $btnAgregar.disabled = !v;
+        $btnAgregar.textContent = v ? 'Agregar al carrito' : 'Agotado';
+      }
+      pintarPrecioVariante();
 
       $lista.addEventListener('click', (e) => {
         const btn = e.target.closest('button');
-        if (!btn) return;
-        document.querySelectorAll('#variantes-lista button').forEach(b => {
-          b.classList.remove('border-slate-950', 'bg-slate-950', 'text-white');
-          b.classList.add('border-slate-200', 'text-slate-600');
+        if (!btn || btn.disabled) return;
+        document.querySelectorAll('#variantes-lista button:not([disabled])').forEach(b => {
+          b.classList.remove.apply(b.classList, CLS_ACTIVA);
+          b.classList.add.apply(b.classList, CLS_NORMAL);
         });
-        btn.classList.remove('border-slate-200', 'text-slate-600');
-        btn.classList.add('border-slate-950', 'bg-slate-950', 'text-white');
+        btn.classList.remove.apply(btn.classList, CLS_NORMAL);
+        btn.classList.add.apply(btn.classList, CLS_ACTIVA);
         seleccionada = btn.dataset.varianteId;
+        pintarPrecioVariante();
       });
 
-      document.getElementById('btn-agregar').addEventListener('click', function() {
-        var badges = obtenerBadges(producto);
-        var agotado = badges.some(function(b) { return b.tipo === 'agotado'; });
-        if (agotado) { agregarAlCarrito(producto); return; }
-        var selVariant = producto.variantes.find(function(v) { return v.id === seleccionada; });
-        if (selVariant && selVariant.stock <= 0) { agregarAlCarrito(producto); return; }
-        var opts = {};
-        if (selVariant) {
-          opts.variante = selVariant.nombre;
-          opts.codigo = selVariant.codigo_interno;
-          opts.detalleId = selVariant.id;
-        }
-        agregarAlCarrito(producto, opts);
+      $btnAgregar.addEventListener('click', function() {
+        // agregarAlCarrito valida la variante y su stock (nunca agrega sin variante)
+        agregarAlCarrito(producto, { detalleId: seleccionada });
       });
     } else {
       document.getElementById('btn-agregar').addEventListener('click', function() {

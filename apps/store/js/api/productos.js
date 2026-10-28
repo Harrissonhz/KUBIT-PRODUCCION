@@ -41,7 +41,8 @@ function _extraerDescripcionCorta(texto) {
 }
 
 function mapearProducto(row) {
-  var detalles = row.detalles || [];
+  // T1 (ST-27): las variantes eliminadas en el POS no se muestran
+  var detalles = (row.detalles || []).filter(function(d) { return d && !d.deleted_at; });
   var multimedia = row.multimedia || [];
   var catNombre = row.categoria ? row.categoria.nombre : 'general';
   var catSlug = _slugify(catNombre);
@@ -80,9 +81,20 @@ function mapearProducto(row) {
         id: d.id,
         nombre: nombreVariante,
         stock: d.stock_actual || 0,
-        codigo_interno: d.codigo_interno || ''
+        codigo_interno: d.codigo_interno || '',
+        precio: d.precio_venta || 0,                 // T1 (ST-26): precio por variante
+        precio_original: d.precio_original || null
       };
     });
+  }
+
+  // T1 (ST-28): precio minimo y si las variantes tienen precios distintos
+  var precioMin = primerDetalle.precio_venta || 0;
+  var preciosDistintos = false;
+  if (variantes.length > 0) {
+    var precios = variantes.map(function(v) { return v.precio; });
+    precioMin = Math.min.apply(null, precios);
+    preciosDistintos = precios.some(function(p) { return p !== precios[0]; });
   }
 
   return {
@@ -95,6 +107,8 @@ function mapearProducto(row) {
     descripcion_larga: row.descripcion || '',
     precio: primerDetalle.precio_venta || 0,
     precio_original: primerDetalle.precio_original || null,
+    precioMin: precioMin,
+    preciosDistintos: preciosDistintos,
     categoria: catSlug,
     stock: primerDetalle.stock_actual || 0,
     tipo: row.tipo_producto || 'Fisico',

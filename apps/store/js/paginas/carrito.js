@@ -1,6 +1,43 @@
 document.addEventListener('DOMContentLoaded', function() {
+  depurarCarritoGuardado();
   renderCarrito();
 });
+
+// T1 (ST-02): cada linea del carrito debe tener detalleId (variante).
+// Las lineas antiguas sin detalleId se descartan; las repetidas se unen.
+function normalizarCarrito(items) {
+  var validos = [];
+  var descartados = 0;
+  var porDetalle = {};
+  (Array.isArray(items) ? items : []).forEach(function(it) {
+    if (!it || !it.detalleId) { descartados++; return; }
+    var cant = parseInt(it.cantidad, 10);
+    if (!(cant > 0)) cant = 1;
+    if (porDetalle[it.detalleId]) {
+      porDetalle[it.detalleId].cantidad += cant;
+      return;
+    }
+    var copia = Object.assign({}, it, { cantidad: cant });
+    porDetalle[it.detalleId] = copia;
+    validos.push(copia);
+  });
+  return { items: validos, descartados: descartados };
+}
+
+function depurarCarritoGuardado() {
+  var r = normalizarCarrito(obtenerCarrito());
+  if (r.descartados > 0 || JSON.stringify(r.items) !== localStorage.getItem('kubit_carrito')) {
+    guardarCarrito(r.items);
+  }
+  if (r.descartados > 0 && typeof Modal === 'function') {
+    Modal({
+      titulo: 'Actualizamos tu carrito',
+      contenido: '<p class="text-sm text-slate-600">Retiramos ' + r.descartados +
+        (r.descartados === 1 ? ' producto agregado' : ' productos agregados') +
+        ' con una versión anterior de la tienda. Agrégalos de nuevo eligiendo la opción que deseas.</p>'
+    });
+  }
+}
 
 function obtenerCarrito() {
   try {
@@ -51,7 +88,7 @@ function renderCarrito() {
 function renderItemRow(item) {
   var subtotal = (item.precio || 0) * (item.cantidad || 1);
   return '\
-    <div class="flex flex-col sm:grid sm:grid-cols-12 gap-3 sm:gap-4 px-4 sm:px-6 py-4" data-id="' + item.productoId + '">\
+    <div class="flex flex-col sm:grid sm:grid-cols-12 gap-3 sm:gap-4 px-4 sm:px-6 py-4" data-id="' + item.detalleId + '">\
         <div class="sm:col-span-6 flex items-center gap-3">\
         <div class="w-16 h-16 rounded-lg bg-gray-100 overflow-hidden shrink-0">\
           <img src="' + (item.imagen || '') + '" alt="' + (item.nombre || '') + '" class="w-full h-full object-cover" loading="lazy">\
@@ -101,11 +138,11 @@ document.getElementById('carrito-items').addEventListener('click', function(e) {
   var row = btn.closest('[data-id]');
   if (!row) return;
 
-  var productoId = row.getAttribute('data-id');
+  var detalleId = row.getAttribute('data-id');   // T1 (ST-02): fila = variante
   var items = obtenerCarrito();
   var idx = -1;
   for (var i = 0; i < items.length; i++) {
-    if (items[i].productoId === productoId) { idx = i; break; }
+    if (items[i].detalleId === detalleId) { idx = i; break; }
   }
   if (idx === -1) return;
 

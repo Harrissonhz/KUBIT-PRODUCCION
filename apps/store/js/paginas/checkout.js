@@ -50,6 +50,11 @@ function filtrarCiudades(depto) {
   $input.placeholder = 'Escribe tu ciudad...';
 }
 
+// T1 (ST-01): lineas del carrito sin variante (detalleId)
+function lineasSinVariante(items) {
+  return (items || []).filter(function(it) { return !it || !it.detalleId; });
+}
+
 function obtenerCarritoCheckout() {
   try {
     return JSON.parse(localStorage.getItem('kubit_carrito') || '[]');
@@ -183,6 +188,16 @@ async function confirmarPedido(items) {
     return;
   }
 
+  // T1 (ST-01): sin variante no se crea nada
+  if (lineasSinVariante(items).length > 0) {
+    Modal({
+      titulo: 'Actualiza tu carrito',
+      contenido: '<p class="text-sm text-slate-600 mb-4">Hay productos en tu carrito sin la opción elegida. Revisa tu carrito antes de confirmar el pedido.</p>' +
+        '<a href="carrito.html" class="block w-full text-center px-4 py-2 text-sm font-medium bg-slate-950 text-white rounded-lg hover:bg-slate-800 transition-colors">Ir al carrito</a>'
+    });
+    return;
+  }
+
   mostrarEstadoCargando(true);
 
   try {
@@ -263,12 +278,10 @@ async function confirmarPedido(items) {
       var cant = item.cantidad || 1;
       var precio = item.precio || 0;
 
-      var detallesProducto = await __supabase.get('pos_productos_detalle?producto_id=eq.' + item.productoId + '&deleted_at=is.null&limit=1');
-      if (!detallesProducto || !detallesProducto.length) throw new Error('Producto sin detalle disponible: ' + (item.nombre || 'ID ' + item.productoId));
-
+      // T1 (ST-01): se guarda la variante elegida por el cliente
       detalleData.push({
         pedido_id: pedidoId,
-        producto_detalle_id: detallesProducto[0].id,
+        producto_detalle_id: item.detalleId,
         cantidad: cant,
         precio_unitario: precio,
         subtotal: cant * precio,

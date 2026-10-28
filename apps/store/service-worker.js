@@ -1,4 +1,4 @@
-var CACHE = 'outletshop-20260619-01'; // Bump: YYYYMMDD-NN (incrementar NN por cada deploy del mismo dia)
+var CACHE = 'outletshop-20261028-01'; // Bump: YYYYMMDD-NN (incrementar NN por cada deploy del mismo dia)
 
 var ASSETS = [
   'index.html',
