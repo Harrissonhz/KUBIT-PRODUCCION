@@ -249,7 +249,7 @@
 
 | ID | Tarea | Estado |
 |---|---|---|
-| OP-01 | Borrar los 5 pedidos de prueba de producción (KBT-202610-8977, -0409, -9276, -1848, -7621) y su detalle. | Pendiente |
+| OP-01 | Borrar los 5 pedidos de prueba de producción (KBT-202610-8977, -0409, -9276, -1848, -7621) y su detalle. | Hecho 2026-10-28 |
 
 ## 9. Historial
 
