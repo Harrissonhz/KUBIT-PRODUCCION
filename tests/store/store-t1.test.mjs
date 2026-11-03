@@ -9,6 +9,8 @@
      ST-26 precio por variante
      ST-27 variantes eliminadas en el POS no se muestran
      ST-28 "Desde $X" cuando las variantes tienen precios distintos
+   Actualizado en T2: el checkout ya no inserta en tablas; ST-01 se verifica por la
+   llamada a la funcion st_crear_pedido (los items que envia el navegador).
    Modulo ES (el package.json del repo usa "type": "module").
    Sin dependencias: node:test y node:vm. No toca la base de datos.
    Ejecutar desde la raiz del repo:
@@ -19,101 +21,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
-import { fileURLToPath } from 'node:url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const STORE = path.join(__dirname, '..', '..', 'apps', 'store');
-const leer = (rel) => fs.readFileSync(path.join(STORE, rel), 'utf8');
-// Los objetos creados dentro de vm se comparan como JSON (otro contexto)
-const plano = (x) => JSON.parse(JSON.stringify(x));
-
-/* ---------- DOM y navegador simulados (lo minimo que usa la tienda) ---------- */
-function crearElemento(id) {
-  const listeners = {};
-  const el = {
-    id, value: '', checked: true, disabled: false, textContent: '', placeholder: '',
-    className: '', dataset: {}, children: [], _html: '',
-    classList: { add() {}, remove() {}, contains: () => false },
-    get innerHTML() { return this._html; },
-    set innerHTML(v) { this._html = String(v); },
-    appendChild(c) { this.children.push(c); return c; },
-    insertBefore(c) { this.children.push(c); return c; },
-    addEventListener(tipo, fn) { (listeners[tipo] = listeners[tipo] || []).push(fn); },
-    _disparar(tipo, ev) { (listeners[tipo] || []).forEach((fn) => fn(ev)); },
-    querySelector() { return el._boton || (el._boton = crearElemento('btn')); },
-    querySelectorAll() { return []; },
-    closest() { return null; },
-    getAttribute() { return null; },
-    remove() {}
-  };
-  return el;
-}
-
-function crearEntorno() {
-  const almacen = {};
-  const elementos = {};
-  const modales = [];
-  const posts = [];
-  const sandbox = {
-    console, Intl, JSON, Math, Date, Object, Array, String, Number, Promise, URLSearchParams, encodeURIComponent,
-    localStorage: {
-      getItem: (k) => (k in almacen ? almacen[k] : null),
-      setItem: (k, v) => { almacen[k] = String(v); },
-      removeItem: (k) => { delete almacen[k]; }
-    },
-    document: {
-      getElementById: (id) => elementos[id] || (elementos[id] = crearElemento(id)),
-      createElement: () => crearElemento('nuevo'),
-      querySelector: (sel) => (sel.includes('pago') ? { value: 'contraentrega' } : null),
-      querySelectorAll: () => [],
-      addEventListener() {}
-    },
-    Modal: (m) => { modales.push(m); },
-    actualizarBadgeCarrito: () => {},
-    __modales: modales,
-    __posts: posts
-  };
-  sandbox.window = sandbox;
-  sandbox.window.location = { href: '', search: '' };
-  sandbox.__supabase = {
-    get: async (url) => {
-      if (url.startsWith('pos_canales_venta')) return [{ id: 'canal-web' }];
-      if (url.startsWith('pos_clientes')) return [{ id: 'cliente-1' }];
-      if (url.startsWith('pos_productos_detalle')) return [{ id: 'PRIMER-SKU-DEL-PRODUCTO' }];
-      return [];
-    },
-    post: async (tabla, datos) => {
-      posts.push({ tabla, datos });
-      if (tabla === 'st_pedidos_detalle') return datos;
-      return [{ id: tabla + '-1' }];
-    }
-  };
-  vm.createContext(sandbox);
-  return sandbox;
-}
-
-function cargar(ctx, ...archivos) {
-  archivos.forEach((rel) => vm.runInContext(leer(rel), ctx, { filename: rel }));
-}
-
-/* ---------- Datos de prueba: Funda Cojin Navidena (2 variantes) ---------- */
-function filaCojin(extra = {}) {
-  return Object.assign({
-    id: 'prod-cojin',
-    nombre: 'Funda Cojín Navideña Felpa (Reno / Muñeco Nieve)',
-    slug: 'funda-cojin-navidena',
-    descripcion: 'Funda para cojín navideña.',
-    tipo_producto: 'Fisico',
-    tags: [],
-    categoria: { nombre: 'Hogar' },
-    multimedia: [],
-    detalles: [
-      { id: 'det-muneco', codigo_interno: 'SEG011', atributos: { 'Diseño': 'Muñeco Nieve' }, stock_actual: 2, precio_venta: 25000, precio_original: null },
-      { id: 'det-reno', codigo_interno: 'SEG011-Reno', atributos: { 'Diseño': 'Reno' }, stock_actual: 2, precio_venta: 25000, precio_original: null }
-    ]
-  }, extra);
-}
-const carrito = (ctx) => JSON.parse(ctx.localStorage.getItem('kubit_carrito') || '[]');
+import { STORE, leer, plano, crearEntorno, cargar, filaCojin, carrito, llenarFormulario } from './_entorno.mjs';
 
 /* ================= productos.js (ST-26, ST-27, ST-28) ================= */
 test('ST-26: cada variante trae su propio precio', () => {
@@ -270,25 +178,23 @@ test('ST-02: botones +, - y eliminar actuan sobre la variante de su fila', () =>
   assert.deepEqual(carrito(ctx).map((l) => l.detalleId), ['det-muneco']);
 });
 
-/* ================= checkout.js (ST-01) ================= */
+/* ================= checkout.js (ST-01) — verificado por la llamada a la funcion ================= */
 async function confirmar(lineas) {
   const ctx = crearEntorno();
   cargar(ctx, 'js/compartido/utils.js', 'js/paginas/checkout.js');
-  const campos = { 'checkout-nombre': 'Cliente Prueba', 'checkout-email': 'prueba@correo.com', 'checkout-telefono': '3001234567',
-    'checkout-direccion': 'Calle 1', 'checkout-ciudad': 'Itagüí', 'checkout-departamento': 'Antioquia' };
-  Object.keys(campos).forEach((id) => { ctx.document.getElementById(id).value = campos[id]; });
+  llenarFormulario(ctx);
   await ctx.confirmarPedido(lineas);
   return ctx;
 }
 
-test('ST-01: el detalle del pedido guarda el detalleId de cada variante', async () => {
+test('ST-01: el pedido envia el producto_detalle_id de cada variante', async () => {
   const ctx = await confirmar([
     { productoId: 'prod-cojin', detalleId: 'det-muneco', precio: 25000, cantidad: 1 },
     { productoId: 'prod-cojin', detalleId: 'det-reno', precio: 25000, cantidad: 2 }
   ]);
-  const det = ctx.__posts.find((p) => p.tabla === 'st_pedidos_detalle');
-  assert.ok(det, 'debe crear el detalle del pedido');
-  assert.deepEqual(plano(det.datos.map((d) => [d.producto_detalle_id, d.cantidad])), [['det-muneco', 1], ['det-reno', 2]]);
+  assert.equal(ctx.__rpcs.length, 1, 'debe crear el pedido con una sola llamada');
+  const items = plano(ctx.__rpcs[0].params.p_items);
+  assert.deepEqual(items.map((d) => [d.producto_detalle_id, d.cantidad]), [['det-muneco', 1], ['det-reno', 2]]);
 });
 
 test('ST-01: con una linea sin variante no se crea nada', async () => {
@@ -296,6 +202,7 @@ test('ST-01: con una linea sin variante no se crea nada', async () => {
     { productoId: 'prod-cojin', detalleId: 'det-reno', precio: 25000, cantidad: 1 },
     { productoId: 'prod-viejo', precio: 10000, cantidad: 1 }
   ]);
+  assert.equal(ctx.__rpcs.length, 0);
   assert.equal(ctx.__posts.length, 0);
   assert.equal(ctx.__modales.at(-1).titulo, 'Actualiza tu carrito');
 });

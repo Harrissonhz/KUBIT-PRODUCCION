@@ -1,6 +1,15 @@
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
   depurarCarritoGuardado();
   renderCarrito();
+
+  // T2: precios vigentes del POS al abrir el carrito (no toca cantidades ni stock)
+  if (typeof refrescarPreciosCarrito === 'function') {
+    var r = await refrescarPreciosCarrito();
+    if (r.huboCambios) {
+      renderCarrito();
+      avisoCambiosCarrito(r);
+    }
+  }
 });
 
 // T1 (ST-02): cada linea del carrito debe tener detalleId (variante).
@@ -125,7 +134,6 @@ function actualizarResumen(items) {
     totalItems += cant;
     totalSubtotal += (items[i].precio || 0) * cant;
   }
-
   document.getElementById('resumen-items').textContent = 'Subtotal (' + totalItems + ' ' + (totalItems === 1 ? 'item' : 'items') + ')';
   document.getElementById('resumen-subtotal').textContent = formatearMoneda(totalSubtotal);
   document.getElementById('resumen-total').textContent = formatearMoneda(totalSubtotal);
@@ -134,10 +142,8 @@ function actualizarResumen(items) {
 document.getElementById('carrito-items').addEventListener('click', function(e) {
   var btn = e.target.closest('button');
   if (!btn) return;
-
   var row = btn.closest('[data-id]');
   if (!row) return;
-
   var detalleId = row.getAttribute('data-id');   // T1 (ST-02): fila = variante
   var items = obtenerCarrito();
   var idx = -1;
@@ -151,7 +157,6 @@ document.getElementById('carrito-items').addEventListener('click', function(e) {
     guardarCarrito(items);
     renderCarrito();
   }
-
   if (btn.classList.contains('btn-restar')) {
     var cant = items[idx].cantidad || 1;
     if (cant > 1) {
@@ -160,7 +165,6 @@ document.getElementById('carrito-items').addEventListener('click', function(e) {
       renderCarrito();
     }
   }
-
   if (btn.classList.contains('btn-eliminar')) {
     items.splice(idx, 1);
     guardarCarrito(items);

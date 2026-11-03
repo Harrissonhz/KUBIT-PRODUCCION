@@ -1,6 +1,11 @@
+// T3 (ST-09) reemplaza este valor por las tarifas por departamento.
+// En T2 es solo informativo: el valor definitivo lo fija la base de datos en st_crear_pedido.
 var COSTO_ENVIO = 9900;
 
-document.addEventListener('DOMContentLoaded', function() {
+// WhatsApp del negocio (mismo numero del boton flotante de checkout.html)
+var WHATSAPP_NEGOCIO = '573054476133';
+
+document.addEventListener('DOMContentLoaded', async function() {
   var items = obtenerCarritoCheckout();
   if (!items.length) {
     mostrarCarritoVacio();
@@ -8,10 +13,23 @@ document.addEventListener('DOMContentLoaded', function() {
   }
   renderizarResumen(items);
   poblarDepartamentos();
+
   document.getElementById('btn-confirmar-pedido').addEventListener('click', function(e) {
     e.preventDefault();
-    confirmarPedido(items);
+    // Se lee el carrito vigente al confirmar (puede haberse actualizado el precio)
+    confirmarPedido(obtenerCarritoCheckout());
   });
+
+  // T2: precios vigentes del POS al abrir el checkout
+  if (typeof refrescarPreciosCarrito === 'function') {
+    var r = await refrescarPreciosCarrito();
+    if (r.huboCambios) {
+      items = obtenerCarritoCheckout();
+      if (!items.length) mostrarCarritoVacio();
+      else renderizarResumen(items);
+      avisoCambiosCarrito(r);
+    }
+  }
 });
 
 function poblarDepartamentos() {
@@ -57,19 +75,19 @@ function lineasSinVariante(items) {
 
 function obtenerCarritoCheckout() {
   try {
-    return JSON.parse(localStorage.getItem('kubit_carrito') || '[]');
+    var items = JSON.parse(localStorage.getItem('kubit_carrito') || '[]');
+    return Array.isArray(items) ? items : [];
   } catch (e) {
     return [];
   }
 }
 
 function mostrarCarritoVacio() {
-  document.getElementById('checkout-items').innerHTML = '\
-    <div class="text-center py-8">\
-      <p class="text-slate-500 text-sm mb-2">No hay productos en tu carrito</p>\
-      <a href="index.html" class="inline-block mt-2 text-sm text-slate-950 underline">Ir a la tienda</a>\
-    </div>\
-  ';
+  document.getElementById('checkout-items').innerHTML =
+    '<div class="text-center py-8">' +
+      '<p class="text-slate-500 text-sm mb-2">No hay productos en tu carrito</p>' +
+      '<a href="index.html" class="inline-block mt-2 text-sm text-slate-950 underline">Ir a la tienda</a>' +
+    '</div>';
   document.getElementById('checkout-cantidad').textContent = '0';
   document.getElementById('checkout-subtotal').textContent = '$0';
   document.getElementById('checkout-total').textContent = '$0';
@@ -80,7 +98,6 @@ function renderizarResumen(items) {
   var html = '';
   var totalItems = 0;
   var totalSubtotal = 0;
-
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
     var cant = item.cantidad || 1;
@@ -88,23 +105,20 @@ function renderizarResumen(items) {
     var subtotal = cant * precio;
     totalItems += cant;
     totalSubtotal += subtotal;
-
-    html += '\
-      <div class="flex items-center gap-3">\
-        <div class="w-10 h-10 rounded-lg bg-gray-100 overflow-hidden shrink-0">\
-          <img src="' + (item.imagen || '') + '" alt="' + (item.nombre || '') + '" class="w-full h-full object-cover">\
-        </div>\
-        <div class="flex-1 min-w-0">\
-          <p class="text-sm text-slate-900 truncate">' + (item.nombre || 'Producto') + '</p>\
-          ' + (item.variante ? '<p class="text-xs text-slate-500 truncate">' + item.variante + '</p>' : '') + '\
-          ' + (item.codigo ? '<p class="text-[10px] font-mono text-slate-400 truncate">SKU: ' + item.codigo + '</p>' : '') + '\
-          <p class="text-xs text-slate-400">' + cant + ' × ' + formatearMoneda(precio) + '</p>\
-        </div>\
-        <p class="text-sm font-medium text-slate-900">' + formatearMoneda(subtotal) + '</p>\
-      </div>\
-    ';
+    html += '' +
+      '<div class="flex items-center gap-3">' +
+        '<div class="w-10 h-10 rounded-lg bg-gray-100 overflow-hidden shrink-0">' +
+          '<img src="' + (item.imagen || '') + '" alt="' + (item.nombre || '') + '" class="w-full h-full object-cover">' +
+        '</div>' +
+        '<div class="flex-1 min-w-0">' +
+          '<p class="text-sm text-slate-900 truncate">' + (item.nombre || 'Producto') + '</p>' +
+          (item.variante ? '<p class="text-xs text-slate-500 truncate">' + item.variante + '</p>' : '') +
+          (item.codigo ? '<p class="text-[10px] font-mono text-slate-400 truncate">SKU: ' + item.codigo + '</p>' : '') +
+          '<p class="text-xs text-slate-400">' + cant + ' × ' + formatearMoneda(precio) + '</p>' +
+        '</div>' +
+        '<p class="text-sm font-medium text-slate-900">' + formatearMoneda(subtotal) + '</p>' +
+      '</div>';
   }
-
   document.getElementById('checkout-items').innerHTML = html;
   document.getElementById('checkout-cantidad').textContent = totalItems;
   document.getElementById('checkout-subtotal').textContent = formatearMoneda(totalSubtotal);
@@ -127,12 +141,26 @@ function obtenerMetodoPago() {
   return seleccionado ? seleccionado.value : null;
 }
 
+// T2: celular colombiano de 10 digitos que empieza en 3 (acepta +57 / 57 al inicio).
+// Devuelve los 10 digitos o null si no es valido.
+function normalizarCelular(valor) {
+  var d = String(valor == null ? '' : valor).replace(/\D/g, '');
+  if (d.length === 12 && d.indexOf('57') === 0) d = d.slice(2);
+  return /^3\d{9}$/.test(d) ? d : null;
+}
+
+function correoValido(valor) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(valor);
+}
+
+// T2: celular obligatorio y valido; correo opcional (si se escribe, debe ser valido)
 function validarFormulario(data) {
   var errores = [];
-  if (!data.nombre) errores.push('Nombre completo');
-  if (!data.email) errores.push('Email');
-  if (!data.telefono) errores.push('Teléfono');
-  if (!data.direccion) errores.push('Dirección');
+  if (!data.nombre || data.nombre.length < 3) errores.push('Nombre completo');
+  if (!data.telefono) errores.push('Celular (WhatsApp)');
+  else if (!normalizarCelular(data.telefono)) errores.push('Celular válido de 10 dígitos, por ejemplo 300 123 4567');
+  if (data.email && !correoValido(data.email)) errores.push('Correo con formato válido (o déjalo vacío)');
+  if (!data.direccion || data.direccion.length < 5) errores.push('Dirección');
   if (!data.ciudad) errores.push('Ciudad');
   if (!data.departamento) errores.push('Departamento');
   return errores;
@@ -153,6 +181,22 @@ function mostrarEstadoCargando(activo) {
   }
 }
 
+// T2: los errores de la funcion vienen como "[ST_XXX] mensaje" dentro del JSON de PostgREST.
+// Al cliente solo se le muestra el mensaje en espanol, nunca el detalle tecnico.
+function mensajeErrorPedido(err) {
+  var msg = (err && err.message) ? String(err.message) : '';
+  var m = msg.match(/\{[\s\S]*\}\s*$/);
+  if (m) {
+    try {
+      var j = JSON.parse(m[0]);
+      if (j && j.message) msg = String(j.message);
+    } catch (e) { /* se usa el texto tal cual */ }
+  }
+  var p = msg.match(/^\[(ST_[A-Z_]+)\]\s*([\s\S]*)$/);
+  if (p) return { codigo: p[1], texto: p[2] };
+  return { codigo: null, texto: 'No pudimos registrar tu pedido en este momento. Inténtalo de nuevo o escríbenos por WhatsApp.' };
+}
+
 async function confirmarPedido(items) {
   var terminos = document.getElementById('checkout-terminos');
   if (terminos && !terminos.checked) {
@@ -165,16 +209,14 @@ async function confirmarPedido(items) {
 
   var data = leerFormulario();
   var errores = validarFormulario(data);
-
   if (errores.length > 0) {
     Modal({
       titulo: 'Campos obligatorios',
-      contenido: '\
-        <p class="text-sm text-slate-600 mb-3">Completa los siguientes campos:</p>\
-        <ul class="text-sm text-red-500 space-y-1">\
-          ' + errores.map(function(e) { return '<li>• ' + e + '</li>'; }).join('') + '\
-        </ul>\
-      '
+      contenido: '' +
+        '<p class="text-sm text-slate-600 mb-3">Completa los siguientes campos:</p>' +
+        '<ul class="text-sm text-red-500 space-y-1">' +
+          errores.map(function(e) { return '<li>• ' + e + '</li>'; }).join('') +
+        '</ul>'
     });
     return;
   }
@@ -199,134 +241,66 @@ async function confirmarPedido(items) {
   }
 
   mostrarEstadoCargando(true);
-
   try {
     if (!window.__supabase) throw new Error('Cliente de base de datos no disponible');
 
-    // 1. Obtener canal Web
-    var canales = await __supabase.get('pos_canales_venta?codigo=eq.web&limit=1');
-    if (!canales || !canales.length) throw new Error('Canal de venta Web no encontrado');
-    var canalId = canales[0].id;
+    var celular = normalizarCelular(data.telefono);
 
-    // 2. Buscar cliente existente por email o crear uno nuevo
-    var clientes = await __supabase.get('pos_clientes?email=eq.' + encodeURIComponent(data.email) + '&deleted_at=is.null&limit=1');
-    var clienteId;
-    if (clientes && clientes.length > 0) {
-      clienteId = clientes[0].id;
-    } else {
-      var partesNombre = (data.nombre || '').trim().split(' ');
-      var nuevoCliente = await __supabase.post('pos_clientes', {
-        tipo_id: 'NIT',
-        numero_id: 'CG-' + Date.now().toString(36).toUpperCase(),
-        primer_nombre: partesNombre[0] || 'Invitado',
-        primer_apellido: partesNombre.slice(1).join(' ') || 'Store',
-        email: data.email,
-        celular: data.telefono || null
-      });
-      if (!nuevoCliente || !nuevoCliente.length) throw new Error('Error al crear cliente');
-      clienteId = nuevoCliente[0].id;
-    }
-
-    // 3. Crear direccion de envio
-    var direcciones = await __supabase.post('st_direcciones', {
-      cliente_id: clienteId,
-      tipo: 'envio',
-      nombre_destinatario: data.nombre,
-      telefono: data.telefono || null,
-      direccion: data.direccion,
-      ciudad: data.ciudad,
-      departamento: data.departamento,
-      pais: 'Colombia'
+    // T2 (ST-04/05/07/08): una sola llamada. La base de datos valida, toma el precio
+    // del POS, asigna el cliente "Consumidor final", genera el numero y crea todo
+    // en una transaccion. El navegador NO envia precios, totales ni cliente.
+    var pedido = await __supabase.rpc('st_crear_pedido', {
+      p_nombre: data.nombre,
+      p_celular: celular,
+      p_email: data.email || null,
+      p_direccion: data.direccion,
+      p_ciudad: data.ciudad,
+      p_departamento: data.departamento,
+      p_metodo_pago: metodoPago,
+      p_items: items.map(function(it) {
+        return { producto_detalle_id: it.detalleId, cantidad: it.cantidad || 1 };
+      })
     });
-    if (!direcciones || !direcciones.length) throw new Error('Error al crear direccion');
-    var direccionId = direcciones[0].id;
-
-    // 4. Calcular totales
-    var totalItems = items.reduce(function(sum, item) { return sum + (item.cantidad || 1); }, 0);
-    var totalSubtotal = items.reduce(function(sum, item) { return sum + (item.precio || 0) * (item.cantidad || 1); }, 0);
-    var total = totalSubtotal + COSTO_ENVIO;
-
-    // 5. Generar numero de pedido
-    var ahora = new Date();
-    var y = ahora.getFullYear();
-    var m = String(ahora.getMonth() + 1).padStart(2, '0');
-    var r = String(Math.floor(Math.random() * 9999)).padStart(4, '0');
-    var numeroPedido = 'KBT-' + y + m + '-' + r;
-
-    // 6. Crear pedido
-    var pedidos = await __supabase.post('st_pedidos', {
-      numero_pedido: numeroPedido,
-      cliente_id: clienteId,
-      canal_id: canalId,
-      direccion_envio_id: direccionId,
-      direccion_facturacion_id: direccionId,
-      fecha_pedido: ahora.getFullYear() + '-' + String(ahora.getMonth() + 1).padStart(2, '0') + '-' + String(ahora.getDate()).padStart(2, '0'),
-      estado: 'PENDIENTE',
-      subtotal: totalSubtotal,
-      descuento: 0,
-      costo_envio: COSTO_ENVIO,
-      total: total,
-      notas: 'Metodo de pago: ' + (metodoPago || 'No especificado')
-    });
-    if (!pedidos || !pedidos.length) throw new Error('Error al crear pedido');
-    var pedidoId = pedidos[0].id;
-
-    // 7. Resolver producto_detalle_id y crear detalle del pedido
-    var detalleData = [];
-    for (var i = 0; i < items.length; i++) {
-      var item = items[i];
-      var cant = item.cantidad || 1;
-      var precio = item.precio || 0;
-
-      // T1 (ST-01): se guarda la variante elegida por el cliente
-      detalleData.push({
-        pedido_id: pedidoId,
-        producto_detalle_id: item.detalleId,
-        cantidad: cant,
-        precio_unitario: precio,
-        subtotal: cant * precio,
-        total: cant * precio
-      });
-    }
-
-    await __supabase.post('st_pedidos_detalle', detalleData);
+    if (!pedido || !pedido.numero_pedido) throw new Error('Respuesta inesperada al crear el pedido');
 
     localStorage.removeItem('kubit_carrito');
     if (typeof actualizarBadgeCarrito === 'function') actualizarBadgeCarrito();
-
     mostrarEstadoCargando(false);
 
-    Modal({
-      titulo: 'Pedido registrado',
-      contenido: '\
-        <div class="text-center py-2">\
-          <svg class="w-14 h-14 mx-auto text-green-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">\
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>\
-          </svg>\
-          <p class="text-sm text-slate-600 mb-1">Pedido <strong>#' + numeroPedido + '</strong> registrado!</p>\
-          <p class="text-sm text-slate-600 mb-1">Hemos recibido tu pedido de <strong>' + totalItems + ' ' + (totalItems === 1 ? 'producto' : 'productos') + '</strong>.</p>\
-          <p class="text-sm text-slate-500 mb-5">Te enviaremos la confirmacion a <strong>' + data.email + '</strong>.</p>\
-          <a href="index.html" class="block w-full text-center px-4 py-2 text-sm font-medium bg-slate-950 text-white rounded-lg hover:bg-slate-800 transition-colors">Volver a la tienda</a>\
-        </div>\
-      '
-    });
+    var totalItems = Number(pedido.total_items) ||
+      items.reduce(function(sum, item) { return sum + (item.cantidad || 1); }, 0);
 
+    Modal({
+      titulo: 'Pedido recibido',
+      contenido: '' +
+        '<div class="text-center py-2">' +
+          '<svg class="w-14 h-14 mx-auto text-green-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>' +
+          '</svg>' +
+          '<p class="text-sm text-slate-600 mb-1">Pedido <strong>#' + escaparHtml(pedido.numero_pedido) + '</strong> recibido</p>' +
+          '<p class="text-sm text-slate-600 mb-1">' + totalItems + ' ' + (totalItems === 1 ? 'producto' : 'productos') +
+            ' · Total <strong>' + formatearMoneda(pedido.total) + '</strong>' +
+            (pedido.costo_envio ? ' (incluye envío de ' + formatearMoneda(pedido.costo_envio) + ')' : '') + '</p>' +
+          '<p class="text-sm text-slate-500 mb-5">Te contactaremos por WhatsApp al <strong>' + escaparHtml(celular) +
+            '</strong> para confirmar tu pedido y el pago.</p>' +
+          '<a href="index.html" class="block w-full text-center px-4 py-2 text-sm font-medium bg-slate-950 text-white rounded-lg hover:bg-slate-800 transition-colors">Volver a la tienda</a>' +
+        '</div>'
+    });
   } catch (err) {
     console.error('Error al crear pedido:', err);
     mostrarEstadoCargando(false);
-
+    var e = mensajeErrorPedido(err);
     Modal({
       titulo: 'No se pudo procesar',
-      contenido: '\
-        <div class="text-center py-2">\
-          <svg class="w-14 h-14 mx-auto text-red-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">\
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>\
-          </svg>\
-          <p class="text-sm text-slate-600 mb-1">Ocurrio un error al registrar tu pedido.</p>\
-          <p class="text-xs text-slate-400 mb-5">Detalle: ' + err.message + '</p>\
-          <button class="block w-full text-center px-4 py-2 text-sm font-medium bg-slate-950 text-white rounded-lg hover:bg-slate-800 transition-colors" onclick="this.closest(\'.fixed\').remove()">Intentar de nuevo</button>\
-        </div>\
-      '
+      contenido: '' +
+        '<div class="text-center py-2">' +
+          '<svg class="w-14 h-14 mx-auto text-red-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>' +
+          '</svg>' +
+          '<p class="text-sm text-slate-600 mb-5">' + escaparHtml(e.texto) + '</p>' +
+          '<a href="https://wa.me/' + WHATSAPP_NEGOCIO + '" target="_blank" rel="noopener" class="block w-full text-center px-4 py-2 mb-2 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">Escribir por WhatsApp</a>' +
+          '<button class="block w-full text-center px-4 py-2 text-sm font-medium bg-slate-950 text-white rounded-lg hover:bg-slate-800 transition-colors" onclick="this.closest(\'.fixed\').remove()">Intentar de nuevo</button>' +
+        '</div>'
     });
   }
 }
