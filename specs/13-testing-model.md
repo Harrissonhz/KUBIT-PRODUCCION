@@ -273,6 +273,27 @@ Para pruebas que requieren una base de datos real (no mocks):
 
 ---
 
+## 12.1 Tests de la Tienda (`tests/store/`, desde 2026-10-28)
+
+La tienda tiene su propia suite, separada de Vitest:
+
+| Aspecto | Regla |
+|---|---|
+| Ubicación | `tests/store/*.test.mjs` (módulos ES; el `package.json` usa `"type": "module"`) |
+| Runner | `node --test tests/store/*.test.mjs` (sin dependencias: `node:test`, `node:assert`, `node:vm`) |
+| Vitest | Solo toma `tests/**/*.test.js`; **no** crear tests de la tienda con extensión `.js` (en oct-2026 un duplicado `store-t1.test.js` hizo fallar `npm test`) |
+| Entorno | `tests/store/_entorno.mjs` carga el código real de `apps/store` en `node:vm` con DOM, `localStorage` y `__supabase` simulados (`get`, `post`, `rpc`). No es un test |
+| Base de datos | Los tests **no** tocan la base. Los scripts SQL de la tienda (15, 16, 17, 03) se validan como texto; su ejecución real se prueba a mano en QA |
+| Ambiente | `ambiente.test.mjs` falla si `supabase-client.js` apunta a otro proyecto que el POS/WMS del mismo repo o si su llave no es `anon` (ST-29) |
+| Archivos actuales | `store-t1` (20), `store-t2` (35), `ambiente` (4), `store-t3a` (15), `store-t3b` (37) = **111 casos** |
+| Regla por fase | Cada fase de la tienda agrega su `store-<fase>.test.mjs`; los anteriores deben seguir pasando |
+
+**Antes de cualquier commit** se corren las dos suites:
+```bash
+node --test tests/store/*.test.mjs   # tienda: pass 111, fail 0
+npm test                             # POS (Vitest): 119 passed
+```
+
 ## 13. Referencias
 
 - `vitest.config.js` — Configuracion del test runner

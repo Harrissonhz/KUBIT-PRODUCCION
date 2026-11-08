@@ -535,6 +535,9 @@ POST /rest/v1/st_carritos_detalle
 ### 4.3 Pedidos
 
 #### 4.3.1 Crear pedido
+
+> **OBSOLETO para la tienda desde T2 (2026-11-03):** el rol `anon` ya no puede insertar en `st_pedidos`. La tienda crea pedidos con `rpc/st_crear_pedido` (§9.1). Este contrato solo aplicaria a un usuario `authenticated` (POS).
+
 ```
 POST /rest/v1/st_pedidos
 Prefer: return=representation
@@ -701,9 +704,11 @@ POST /rest/v1/rpc/calcular_finanzas_mes
 
 ---
 
-## 6. Checkout Flow (Guest — REST API Directa)
+## 6. Checkout Flow (Guest — REST API Directa) — OBSOLETO
 
-**Importante:** El Store NO usa Edge Functions. El checkout opera 100% via REST API directa a PostgREST con la anon key.
+> **OBSOLETO desde T2 (2026-11-03).** Se conserva como referencia histórica. Estas llamadas ya **no funcionan** con la llave `anon` (script `16-store-cerrar-acceso-anon.sql`) y el checkout ya no las hace. El flujo vigente es una sola llamada a `rpc/st_crear_pedido` (§9).
+
+**Importante (histórico):** El Store NO usa Edge Functions. El checkout operaba 100% via REST API directa a PostgREST con la anon key.
 
 ### 6.1 Obtener Canal Web
 ```
@@ -842,3 +847,80 @@ GET /rest/v1/pos_productos_detalle?producto_id=eq.{productoId}&deleted_at=is.nul
 | `{{PROJECT_REF}}` | Identificador del proyecto | `abcde12345` |
 
 > Estos valores se configuran en `apps/pos/js/config.js` (no versionado) a partir del template `apps/pos/js/config.ejemplo.js`.
+
+## 9. RPC de la Tienda (vigente desde T2 y T3b)
+
+Llamadas con la llave `anon`: `POST {{SUPABASE_URL}}/rest/v1/rpc/<funcion>` con `apikey` y `Authorization: Bearer {{SUPABASE_ANON_KEY}}`. En el código: `__supabase.rpc(nombre, params)` (`apps/store/js/api/supabase-client.js`). Scripts: `specs/15-store-pedido-seguro.sql` y `specs/17-store-checkout-coherente.sql` (versión vigente de `st_crear_pedido`).
+
+### 9.1 `st_crear_pedido`
+```
+POST /rest/v1/rpc/st_crear_pedido
+```
+**Body:**
+```json
+{
+  "p_nombre": "Ana Gomez",
+  "p_celular": "3001234567",
+  "p_email": null,
+  "p_direccion": "Calle 1 # 2-3",
+  "p_ciudad": "Itagui",
+  "p_departamento": "Antioquia",
+  "p_metodo_pago": "transferencia",
+  "p_items": [ { "producto_detalle_id": "uuid-variante", "cantidad": 2 } ]
+}
+```
+- `p_metodo_pago`: `transferencia`, `mercado_pago` o `contraentrega` (`tarjeta` se acepta y se guarda como `mercado_pago`).
+- `p_items`: 1 a 30 líneas, cantidad 1 a 99. Solo se leen `producto_detalle_id` y `cantidad`; cualquier precio enviado se ignora.
+
+**Response 200:**
+```json
+{
+  "numero_pedido": "KBT-202611-000012",
+  "subtotal": 50000, "costo_envio": 15000, "total": 65000, "total_items": 2,
+  "lineas": [ { "producto_detalle_id": "uuid", "codigo": "SEG011", "nombre": "...", "cantidad": 2, "precio": 25000, "subtotal": 50000 } ],
+  "medio_pago": "transferencia",
+  "zona": "local", "zona_nombre": "Valle de Aburra", "dias_min": 1, "dias_max": 2,
+  "envio_gratis": false,
+  "stock_insuficiente": false,
+  "pago": { "tipo": "transferencia", "llave": "...", "titular": "...", "qr_url": null },
+  "whatsapp": "573054476133"
+}
+```
+- `pago` es `{ "tipo": "mercado_pago", "link": "..." }` para Mercado Pago y `null` para contraentrega **o cuando `stock_insuficiente` es `true`**.
+- Efectos: crea `st_direcciones` (datos del comprador, cliente CONSUMIDOR Ecommerce), `st_pedidos` (`PENDIENTE`, `medio_pago_web`, `notas` con medio, zona y aviso de stock) y `st_pedidos_detalle`. No mueve inventario.
+
+**Errores** (HTTP 400, `code: P0001`, `message` con prefijo):
+
+| Prefijo | Causa |
+|---|---|
+| `[ST_NOMBRE]` | Nombre de menos de 3 o más de 120 caracteres |
+| `[ST_CELULAR]` | Celular que no es 10 dígitos empezando en 3 (acepta `57` al inicio) |
+| `[ST_EMAIL]` | Correo con formato inválido |
+| `[ST_DIRECCION]` / `[ST_UBICACION]` | Dirección, ciudad o departamento vacíos o demasiado largos |
+| `[ST_PAGO]` | Medio de pago no reconocido |
+| `[ST_ITEMS]` | Carrito vacío, más de 30 líneas, cantidad inválida, variante inexistente, eliminada o sin precio |
+| `[ST_MINIMO]` | Subtotal menor que `pedido_minimo` |
+| `[ST_LIMITE]` | 5 o más pedidos `PENDIENTE` del mismo celular en 24 horas |
+| `[ST_CONFIG]` | No hay exactamente un cliente CONSUMIDOR Ecommerce, un canal `web` o una zona de envío válida |
+
+### 9.2 `st_cotizar_envio`
+```
+POST /rest/v1/rpc/st_cotizar_envio
+{ "p_departamento": "Antioquia", "p_ciudad": "Itagui" }
+```
+**Response:** `{ "codigo": "local", "nombre": "Valle de Aburra", "valor": 15000, "dias_min": 1, "dias_max": 2, "envio_gratis_desde": 80000 }` o `null` si faltan datos o no hay zona. Solo lectura; el valor definitivo lo calcula `st_crear_pedido`.
+
+### 9.3 `st_config_tienda`
+```
+POST /rest/v1/rpc/st_config_tienda
+{}
+```
+**Response:** `{ "envio_gratis_desde": 80000, "pedido_minimo": 15000, "whatsapp": "573054476133" }`. No expone la llave Bre-B ni el link de pago.
+
+### 9.4 Cambiar la configuración (solo SQL Editor)
+```sql
+update public.st_configuracion set valor = 'NUEVO_VALOR', updated_at = now() where clave = 'mercado_pago_link';
+update public.st_tarifas_envio set valor = 16000, dias_min = 1, dias_max = 2, updated_at = now() where codigo = 'local';
+insert into public.st_destinos_envio (zona, departamento, ciudad) values ('local', 'Antioquia', 'Rionegro');
+```
+Claves de `st_configuracion`: `envio_gratis_desde`, `pedido_minimo`, `envio_zona_defecto`, `bre_b_llave`, `bre_b_titular`, `bre_b_qr_url`, `mercado_pago_link`, `whatsapp`. Las tablas no están abiertas a `anon` ni a `authenticated` (no hay pantalla de edición; ver ST-31).

@@ -37,9 +37,11 @@ create extension if not exists unaccent;
 -- ============================================================
 -- PASO 3: Grants y RLS para Store checkout anonimo
 -- Archivo: 03-seed-store-grants.sql
--- Contenido: Grants INSERT+SELECT para rol anon
---            RLS policies en pos_clientes, st_direcciones,
---            st_pedidos, st_pedidos_detalle
+-- Contenido: Grants del rol anon para la tienda.
+--            Desde T2 (2026-11-03): pos_clientes con SELECT + INSERT
+--            (RA-01 y RA-04) y SIN acceso anon a st_direcciones,
+--            st_pedidos ni st_pedidos_detalle (la tienda crea pedidos
+--            con la funcion st_crear_pedido, PASO 7).
 -- ============================================================
 -- >> Ejecutar 03-seed-store-grants.sql a continuacion
 
@@ -60,10 +62,60 @@ create extension if not exists unaccent;
 
 
 -- ============================================================
+-- PASO 5: URL del WMS en la configuracion del POS (Fase 44)
+-- Archivo: 13-pos-wms-url.sql
+-- Contenido: columna wms_url en pos_configuracion_empresa
+--            (ya incluida en 01-schema.sql; idempotente)
+-- ============================================================
+-- >> Ejecutar 13-pos-wms-url.sql a continuacion
+
+
+-- ============================================================
+-- PASO 6: Tienda T2 — pedido seguro
+-- Archivo: 15-store-pedido-seguro.sql
+-- Contenido: funcion st_crear_pedido (v1), secuencia
+--            st_pedidos_numero_seq, indice unico de numero_pedido,
+--            columna st_direcciones.email
+-- Requisito: un unico cliente CONSUMIDOR Ecommerce
+--            (pos_clientes, numero_id 222222222222) y un unico canal 'web'
+-- ============================================================
+-- >> Ejecutar 15-store-pedido-seguro.sql a continuacion
+
+
+-- ============================================================
+-- PASO 7: Tienda T2 — cerrar acceso anonimo
+-- Archivo: 16-store-cerrar-acceso-anon.sql
+-- Contenido: sin politicas ni permisos anon en st_pedidos,
+--            st_pedidos_detalle y st_direcciones
+-- ATENCION: en un ambiente con la tienda ya publicada, ejecutarlo
+--            SOLO despues de publicar el checkout que usa st_crear_pedido
+-- ============================================================
+-- >> Ejecutar 16-store-cerrar-acceso-anon.sql a continuacion
+
+
+-- ============================================================
+-- PASO 8: Tienda T3b — checkout coherente
+-- Archivo: 17-store-checkout-coherente.sql
+-- Contenido: st_configuracion, st_tarifas_envio, st_destinos_envio,
+--            st_pedidos.medio_pago_web, funciones st_cfg,
+--            st_normalizar_texto, st_zona_envio, st_config_tienda,
+--            st_cotizar_envio y st_crear_pedido v2 (misma firma)
+-- ATENCION: carga tarifas, llave Bre-B, titular y link de pago DE
+--            PRUEBA. En produccion ejecutar en la misma sesion los
+--            UPDATE con los valores reales (al pie del script).
+--            Si el script se vuelve a ejecutar, no sobrescribe valores.
+-- ============================================================
+-- >> Ejecutar 17-store-checkout-coherente.sql a continuacion
+--    Verificacion: select public.st_config_tienda();
+--                  select public.st_cotizar_envio('Antioquia','Itagui');
+
+
+-- ============================================================
 -- FIN: Base de datos 100% operativa
 -- Siguiente paso: Poblar datos desde plan de migracion
 --   ArchivosInformativos/MigracionDB/01-plan-migracion.md
 -- NOTA TEMPLATE: Al clonar Kubit para un nuevo cliente, copiar
 -- 01-schema.sql + 02-seed-permisos.sql + 03-seed-store-grants.sql
--- + 04-rpcs-ventas.sql. Olvidar 04 rompe ventas.
+-- + 04-rpcs-ventas.sql + 13 + 15 + 16 + 17 (en ese orden).
+-- Olvidar 04 rompe ventas. Olvidar 15 o 17 rompe el checkout de la tienda.
 -- ============================================================

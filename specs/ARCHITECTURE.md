@@ -22,7 +22,11 @@
 │   ├── 12-roadmap.md             ← Pendiente
 │   ├── 13-testing-model.md       ← Modelo de testing automático
 │   ├── ARCHITECTURE.md           ← Este archivo
-│   ├── seed-anon-grants-store.sql← Grants y RLS para rol anon (Store)
+│   ├── seed-anon-grants-store.sql← (historico) Grants anon del checkout antiguo; reemplazado por 03, 15 y 16
+│   ├── 03-seed-store-grants.sql  ← Grants anon de la tienda (desde T2 sin acceso a pedidos, detalle ni direcciones)
+│   ├── 15-store-pedido-seguro.sql      ← Tienda T2: st_crear_pedido, numero de pedido, st_direcciones.email
+│   ├── 16-store-cerrar-acceso-anon.sql ← Tienda T2: cierra el acceso anon a pedidos, detalle y direcciones
+│   ├── 17-store-checkout-coherente.sql ← Tienda T3b: configuracion, zonas de envio, medio_pago_web, st_crear_pedido v2
 │   └── seed-permisos.sql         ← Seed de roles y permisos
 │
 ├── apps/
@@ -126,8 +130,15 @@
 │   │   ├── compras.test.js        ← 12 tests
 │   │   ├── caja.test.js           ← 10 tests
 │   │   └── productos.test.js      ← 10 tests
-│   └── helpers/
-│       └── calculos-pos.js        ← Funciones puras (IVA, descuento, formato)
+│   ├── helpers/
+│   │   └── calculos-pos.js        ← Funciones puras (IVA, descuento, formato)
+│   └── store/                     ← Tests de la tienda (node --test, NO vitest)
+│       ├── _entorno.mjs           ← Utilidades: navegador y Supabase simulados (no es test)
+│       ├── store-t1.test.mjs      ← T1: variantes en carrito y pedido
+│       ├── store-t2.test.mjs      ← T2: st_crear_pedido, celular, precios vigentes, scripts 15/16/03
+│       ├── store-t3a.test.mjs     ← T3a: WhatsApp en la ficha, paginacion por visita
+│       ├── store-t3b.test.mjs     ← T3b: envio por zona, minimo, medios de pago, confirmacion, script 17
+│       └── ambiente.test.mjs      ← ST-29: la tienda apunta al mismo proyecto que POS/WMS y usa llave anon
 │
 ├── .opencode/                     ← Skills para OpenCode CLI
 │   └── skills/
@@ -180,12 +191,13 @@
 
 ### 2.5 Capa de Datos: REST Directa vs Edge Functions
 - POS: 100% REST API directa a Supabase (PostgREST) via `supabase.js`
-- Store: 100% REST API directa via `supabase-client.js`
-- Sin Edge Functions en producción. El checkout usa 7 operaciones REST secuenciales
+- Store: lectura del catalogo por REST directa via `apps/store/js/api/supabase-client.js`; **pedidos solo por la funcion `st_crear_pedido`** (RPC `security definer`, una transaccion) desde T2. Envio y configuracion por `st_cotizar_envio` y `st_config_tienda` (T3b). Ver `specs/11-api-contracts.md` §9
+- Sin Edge Functions en producción. ~~El checkout usa 7 operaciones REST secuenciales~~ (obsoleto desde T2, 2026-11-03)
 
 ### 2.6 Testing
 - vitest + jsdom para tests unitarios y de integración
-- 105 tests en 5 suites (database: 65, auth: 8, compras: 12, caja: 10, productos: 10)
+- POS: 119 tests en 5 suites de Vitest (`npm test`, solo `tests/**/*.test.js`)
+- Tienda: 111 casos en `tests/store/*.test.mjs` con `node --test` (sin dependencias, `node:test` + `node:vm`; no tocan la base; los scripts SQL se validan como texto)
 - Zona horaria: America/Bogota (UTC-5) via `ALTER DATABASE SET timezone`
 - Mocks de `window.__supabase`, `window.KubitAuth`, `localStorage` en `tests/setup.js`
 

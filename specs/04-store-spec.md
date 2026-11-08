@@ -1,5 +1,7 @@
 # Especificación del Módulo Tienda Virtual - Kubit
 
+> **Estado real (2026-11-08):** este documento describe el alcance completo previsto de la tienda. Lo **implementado y vigente en produccion** esta en las secciones marcadas "(vigente)": §2.6, §3.4, §3.9, §3.10 y §5.3. Varias funciones descritas en otras secciones (carrito en DB, cuentas de cliente, pasarela integrada, cupones, reseñas, wishlist, descuento de inventario al pagar) **no estan implementadas** y algunas fueron descartadas por decision de negocio. Ante una contradiccion, prevalecen §5.1 de `AGENTS.md` y `apps/store/specs/hallazgos-tienda.md` (decisiones D1-D28).
+
 ## 1. Descripción General
 El módulo **Store (Tienda Virtual)** es el componente de comercio electrónico del ecosistema Kubit. Permite la venta de productos a través de un catálogo público en línea, con carrito de compras, checkout, procesamiento de pagos y gestión de pedidos.
 
@@ -458,6 +460,21 @@ PENDIENTE → PAGADO → CONFIRMADO → ENVIADO → ENTREGADO
 
 ---
 
+### 2.6 Tablas, columnas y funciones agregadas en T2 y T3b (vigente)
+
+| Objeto | Script | Descripción |
+|---|---|---|
+| `st_direcciones.email` (`text`, nullable) | `15-store-pedido-seguro.sql` | Correo opcional del comprador. Con `nombre_destinatario`, `telefono` (10 dígitos) y la dirección, guarda los datos reales del comprador. |
+| Secuencia `st_pedidos_numero_seq` e índice único `ux_st_pedidos_numero_pedido` | 15 | Número `KBT-AAAAMM-NNNNNN` (consecutivo global). |
+| `st_pedidos.medio_pago_web` (`text`, CHECK `transferencia`/`mercado_pago`/`contraentrega`) | `17-store-checkout-coherente.sql` | Medio de pago elegido en la tienda. Los pedidos web nuevos no llenan `metodo_pago_id` (no se usa `pos_metodos_pago`). |
+| `st_configuracion (clave PK, valor, descripcion, updated_at)` | 17 | Claves: `envio_gratis_desde`, `pedido_minimo`, `envio_zona_defecto`, `bre_b_llave`, `bre_b_titular`, `bre_b_qr_url`, `mercado_pago_link`, `whatsapp`. |
+| `st_tarifas_envio (codigo PK, nombre, valor, dias_min, dias_max, orden, activo, updated_at)` | 17 | Zonas: `local`, `antioquia`, `nacional_principal`, `nacional`, `especial`. |
+| `st_destinos_envio (id, zona FK, departamento, ciudad nullable, activo)` | 17 | Departamento/ciudad → zona. `ciudad` vacía = todo el departamento. Índice único por departamento + ciudad. |
+| Funciones públicas (`anon`, `authenticated`) | 15 y 17 | `st_crear_pedido(...)`, `st_cotizar_envio(p_departamento, p_ciudad)`, `st_config_tienda()`. Contratos en `11-api-contracts.md` §9. |
+| Funciones internas (sin `EXECUTE` para `anon`/`authenticated`) | 17 | `st_cfg(clave)`, `st_zona_envio(dep, ciudad)`, `st_normalizar_texto(t)`. |
+
+**Seguridad:** las tres tablas de configuración tienen RLS activo y `revoke all` para `anon` y `authenticated`; solo las leen el SQL Editor y las funciones `security definer`. El POS no las ve.
+
 ## 3. Reglas de Negocio
 
 ### 3.1 Catálogo
@@ -507,8 +524,8 @@ Los productos pueden tener uno o varios tags (campo `tags text[]` en `pos_produc
 1. **Invitados:** El carrito se asocia a `session_id` (generado por el frontend) y se persiste en localStorage + DB
 2. **Registrados:** El carrito se asocia a `cliente_id` y se sincroniza entre dispositivos
 3. **Al iniciar sesión:** Si el invitado tenía items en el carrito y el cliente no tiene carrito activo, se migra el carrito de invitado al cliente
-4. **Stock:** Al agregar al carrito se muestra disponibilidad, pero la validación firme ocurre en checkout
-5. **Precio:** Se congela al agregar. Si el precio cambia después, se notifica al cliente antes de checkout
+4. **Stock:** Al agregar al carrito se muestra disponibilidad (una variante con stock 0 no se agrega). **(vigente, RA-05):** el checkout **no** valida ni limita stock; si la cantidad supera el disponible el pedido se crea igual con un aviso en `notas`. Ver §3.4
+5. **Precio:** ~~Se congela al agregar~~ **(vigente desde T2):** el carrito guarda el precio al agregar, pero carrito y checkout vuelven a leerlo de `pos_productos_detalle` al abrirse (`utils.js::refrescarPreciosCarrito()`) y avisan si cambió o si una variante ya no existe. El precio definitivo lo toma `st_crear_pedido` de la base.
 6. **Abandono:** Carritos sin actividad por 7 días pasan a `ABANDONADO`. Se pueden enviar correos de recuperación
 
 #### 3.3.1 Estructura del Item en Carrito (localStorage)
@@ -546,34 +563,37 @@ El carrito se persiste en `localStorage` bajo la clave `kubit_carrito` como un a
 - En el carrito (`carrito.js::renderItemRow()`): el nombre del producto en `text-sm font-medium`, la variante debajo en `text-xs text-slate-500`, el SKU en `text-[10px] font-mono text-slate-400`
 - En el checkout (`checkout.js::renderizarResumen()`): mismo patrón de jerarquía tipográfica
 
-### 3.4 Checkout
+### 3.4 Checkout (vigente desde T2 y T3b)
 
-1. Se requiere al menos: dirección de envío, método de pago y aceptación de términos
-2. El guest checkout captura email, nombre y dirección sin crear cuenta completa en `pos_clientes`
-3. Al confirmar el pedido:
-   - Se ejecutan 7 operaciones REST secuenciales via `__supabase.post()` y `__supabase.get()` directamente contra PostgREST
-   - Se crea el registro en `st_pedidos` con estado `PENDIENTE`
-   - El carrito pasa a estado `CONVERTIDO`
-   - Se envía al cliente a la pasarela de pago
-4. Si el pago es `APROBADO`:
-   - Pedido pasa a `PAGADO`
-   - Se descuenta inventario de `pos_productos_detalle.stock_actual`
-   - Se genera movimiento en `pos_movimientos_inventario` (tipo `salida_venta`)
-   - Se envía confirmación por email
-5. Si el pago es `RECHAZADO`:
-   - Pedido permanece `PENDIENTE`
-   - Se notifica al cliente para reintentar
+> Reemplaza la versión anterior de esta sección (7 operaciones REST secuenciales desde el navegador, cliente con NIT inventado, envío fijo de $9.900, pasarela integrada). Esa implementación se retiró en T2 (2026-11-03).
 
-**Arquitectura del checkout:** NO usa Supabase Edge Functions. Todo el flujo corre 100% en el frontend via REST API directa a PostgREST usando `__supabase` (el mismo cliente del resto del Store). Usa la anon key + RLS policies. Ver `specs/seed-anon-grants-store.sql` para los grants necesarios.
+**Formulario:** nombre completo, celular con WhatsApp (obligatorio, 10 dígitos, empieza en 3; acepta `+57`), correo (opcional), dirección, departamento y ciudad (`<datalist>` desde `colombia.js`), medio de pago y aceptación de términos. **Sin cédula ni registro.**
 
-**Flujo interno de `confirmarPedido()` en `checkout.js`:**
-1. `GET pos_canales_venta?codigo=eq.web` — Obtener UUID del canal Web
-2. `GET pos_clientes?email=eq.X` o `POST pos_clientes` — Buscar o crear cliente
-3. `POST st_direcciones` — Crear dirección de envío
-4. *(cálculo)* — Totales y número de pedido (KBT-YYYYMM-NNNN)
-5. `POST st_pedidos` — Crear pedido con `canal_id`, `cliente_id`, `direccion_envio_id`
-6. `GET pos_productos_detalle?producto_id=eq.X` — Resolver `producto_detalle_id` por cada item
-7. `POST st_pedidos_detalle` — Crear detalle del pedido (bulk insert)
+**Medios de pago (D23-D25):**
+
+| Opción en pantalla | `p_metodo_pago` / `medio_pago_web` | Qué ve el cliente al confirmar |
+|---|---|---|
+| Transferencia Bre-B | `transferencia` | Llave con botón "Copiar", "Al transferir verás el nombre: …", valor exacto y referencia (número de pedido); QR solo si `bre_b_qr_url` tiene valor. |
+| Tarjeta débito/crédito (vía Mercado Pago) | `mercado_pago` | "Paga exactamente $X", número de pedido para la descripción y botón "Pagar con Mercado Pago" (Tu Link, monto libre, otra pestaña). |
+| Pago contraentrega | `contraentrega` | "Pagas $X en efectivo al recibir". |
+
+Los datos de pago aparecen **solo después** de crear el pedido. Si el pedido tiene stock insuficiente, no se muestran instrucciones de pago: "Te confirmaremos disponibilidad por WhatsApp antes del pago" (D28).
+
+**Envío y totales en pantalla:** al elegir departamento y ciudad, `checkout.js::cotizarEnvio()` llama `st_cotizar_envio` y muestra valor y "Llega en N–M días hábiles". Barra "Te faltan $X para envío gratis" y aviso de pedido mínimo desde `st_config_tienda()`. Estos valores son informativos: los definitivos los calcula la base.
+
+**Al confirmar (`checkout.js::confirmarPedido()`):** valida formulario, mínimo y que todas las líneas tengan variante, y hace **una sola llamada** `__supabase.rpc('st_crear_pedido', {p_nombre, p_celular, p_email, p_direccion, p_ciudad, p_departamento, p_metodo_pago, p_items:[{producto_detalle_id, cantidad}]})`. El navegador no envía precios, totales, cliente ni número.
+
+**Lo que hace `st_crear_pedido` (transacción única, `security definer`):**
+1. Valida datos (nombre, celular, correo si viene, dirección, ubicación, medio de pago) y carrito (1-30 líneas, cantidades 1-99, líneas repetidas unidas).
+2. Usa el cliente **CONSUMIDOR Ecommerce** (`CC 222222222222`, exactamente uno) y el canal `web` (exactamente uno); si no, aborta con `[ST_CONFIG]`.
+3. Límite anti-abuso: 5 pedidos `PENDIENTE` por celular en 24 horas (`[ST_LIMITE]`).
+4. Toma el precio de cada variante de `pos_productos_detalle` (variante y producto activos y sin borrar).
+5. Pedido mínimo sobre el subtotal (`[ST_MINIMO]`); envío de la zona (`st_zona_envio`), gratis si el subtotal ≥ `envio_gratis_desde`.
+6. Si una cantidad supera `stock_actual`, **no rechaza**: agrega a `notas` `Stock insuficiente: SKU (pedido N, disponible M)`.
+7. Crea dirección (con los datos del comprador), pedido `PENDIENTE` con `medio_pago_web` y detalle; número `KBT-AAAAMM-NNNNNN`.
+8. Devuelve número, totales, zona y días, `stock_insuficiente`, `pago` (datos según el medio, o `null`) y `whatsapp`.
+
+**Después del pedido:** el carrito se vacía y la confirmación ofrece "Confirmar por WhatsApp" con "Hola, acabo de hacer el pedido KBT-… por $X.". El pedido **no descuenta inventario** (D2): la venta real se registra a mano en el POS. No hay pasarela integrada ni correo de confirmación.
 
 ### 3.5 Gestión de Pedidos (Admin)
 
@@ -612,9 +632,25 @@ El carrito se persiste en `localStorage` bajo la clave `kubit_carrito` como un a
 
 ---
 
+### 3.9 Envíos (vigente desde T3b)
+- Zonas en `st_tarifas_envio` y destinos en `st_destinos_envio`. Regla: ciudad exacta > departamento completo > `envio_zona_defecto` (`nacional`). La comparación ignora tildes y mayúsculas (`st_normalizar_texto`); los nombres siguen `colombia.js` (sin tildes).
+- `local` = Medellín y Valle de Aburrá (Medellin, Bello, Itagui, Envigado, Sabaneta, La Estrella, Caldas, Copacabana, Girardota, Barbosa) **solo en Antioquia** (Barbosa de Santander es `nacional`). `antioquia` = resto del departamento. `nacional_principal` = Bogotá, Cali, Barranquilla, Bucaramanga, Pereira, Manizales, Armenia, Cartagena. `especial` = San Andrés y Providencia, Amazonas, Guainía, Vaupés, Vichada, Putumayo.
+- Valores en producción (2026-11-08): local $15.000 (1-2 días), Antioquia $18.000 (2-3), ciudades principales $25.000 (3-4), nacional $30.000 (3-6), zonas especiales $42.000 (5-10). QA conserva valores de prueba.
+- Envío gratis desde $80.000 de subtotal en todas las zonas y medios (RA-03). Contraentrega sin recargo (la comisión de recaudo la asume el negocio).
+- Transportadoras ENVIA e Interrapidísimo; las elige el negocio al despachar.
+- **Cambios de tarifas o destinos:** por SQL (`update public.st_tarifas_envio ...`, `insert into public.st_destinos_envio ...`). No hay pantalla (ST-31).
+
+### 3.10 Pagos y configuración (vigente desde T3b)
+- No hay pasarela integrada (D4). El pago se confirma a mano contra el banco o Mercado Pago (D5).
+- Configuración en `st_configuracion` y cambios por SQL: `update public.st_configuracion set valor = '...', updated_at = now() where clave = '...';`
+- Si se cambian `envio_gratis_desde` o `pedido_minimo`, actualizar también `terminos-condiciones.html` y `preguntas-frecuentes.html`, que tienen los montos escritos.
+
 ## 4. Flujos del Sistema
 
 ### 4.1 Flujo de Compra Completo (Cliente)
+
+> **Previsto, no implementado.** El flujo vigente es: catálogo → carrito → checkout (§3.4) → pedido `PENDIENTE` → confirmación por WhatsApp → pago manual (transferencia o Mercado Pago) o contraentrega → venta registrada a mano en el POS.
+
 ```
 Cliente navega catálogo → Agrega productos al carrito →
   → Inicia sesión o continúa como invitado →
@@ -669,46 +705,27 @@ Cliente solicita devolución → Admin revisa y aprueba →
 4. El carrito de un cliente solo es accesible por ese cliente
 5. El guest checkout crea un registro mínimo en `pos_clientes` sin contraseña
 
-### 5.3 Guest Checkout RLS (rol `anon`)
+### 5.3 Guest Checkout: permisos del rol `anon` (vigente desde T2)
 
-El guest checkout opera con la anon key de Supabase (rol `anon`). Requiere grants y policies adicionales a las del schema base:
+> Reemplaza la versión anterior, que daba a `anon` SELECT e INSERT directos sobre `st_direcciones`, `st_pedidos` y `st_pedidos_detalle` (cualquiera podía leer todos los pedidos y crear pedidos con el precio que quisiera).
 
-**Grants necesarios:**
+| Objeto | Acceso de `anon` | Script |
+|---|---|---|
+| `st_pedidos`, `st_pedidos_detalle`, `st_direcciones` | **Ninguno** (sin políticas `anon`, `revoke all`) | `16-store-cerrar-acceso-anon.sql` |
+| `st_configuracion`, `st_tarifas_envio`, `st_destinos_envio` | **Ninguno** (también sin acceso para `authenticated`) | `17-store-checkout-coherente.sql` |
+| `st_crear_pedido`, `st_cotizar_envio`, `st_config_tienda` | `EXECUTE` | 15 y 17 |
+| `pos_clientes` | Lectura pública (RA-01) e inserción (`anon crean clientes`, RA-04 temporal); la tienda ya no inserta clientes | `03-seed-store-grants.sql` |
+| Catálogo (`pos_productos`, `pos_productos_detalle`, multimedia, categorías) | Lectura | `01-schema.sql` |
+
+`03-seed-store-grants.sql` ya no reabre el acceso a pedidos, detalle ni direcciones si se vuelve a ejecutar. Los usuarios del POS (`authenticated`) conservan sus políticas sobre pedidos.
+
+**Verificación (debe dar 0 filas):**
 ```sql
-grant select, insert on public.pos_clientes to anon;
-grant select, insert on public.st_direcciones to anon;
-grant select, insert on public.st_pedidos to anon;
-grant select, insert on public.st_pedidos_detalle to anon;
+select tablename, policyname from pg_policies
+where schemaname = 'public' and tablename in ('st_pedidos','st_pedidos_detalle','st_direcciones') and 'anon' = any(roles);
+select table_name, privilege_type from information_schema.role_table_grants
+where table_schema = 'public' and grantee = 'anon' and table_name in ('st_pedidos','st_pedidos_detalle','st_direcciones');
 ```
-
-**Policies:**
-```sql
--- pos_clientes
-create policy "anon crean clientes"
-  on public.pos_clientes for insert to anon with check (true);
-
--- st_direcciones
-create policy "anon ven direcciones"
-  on public.st_direcciones for select to anon using (true);
-create policy "anon crean direcciones"
-  on public.st_direcciones for insert to anon with check (true);
-
--- st_pedidos
-create policy "anon ven pedidos"
-  on public.st_pedidos for select to anon using (true);
-create policy "anon crean pedidos"
-  on public.st_pedidos for insert to anon with check (true);
-
--- st_pedidos_detalle
-create policy "anon ven detalle de pedidos"
-  on public.st_pedidos_detalle for select to anon using (true);
-create policy "anon crean detalle de pedidos"
-  on public.st_pedidos_detalle for insert to anon with check (true);
-```
-
-> El archivo `specs/seed-anon-grants-store.sql` contiene el SQL completo listo para ejecutar en Supabase.
-
----
 
 ## 6. Integraciones
 

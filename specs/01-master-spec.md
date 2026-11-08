@@ -35,7 +35,7 @@ Para mantener la integridad del proyecto, se establecen las siguientes reglas:
 - `/specs/00-bootstrap.sql` — Extension unaccent
 - `/specs/01-schema.sql` — DDL completo (35 tablas con grants, RLS, indices, triggers)
 - `/specs/02-seed-permisos.sql` — Seed de roles y permisos por rol
-- `/specs/03-seed-store-grants.sql` — Grants anon para modulo Store
+- `/specs/03-seed-store-grants.sql` — Grants anon para modulo Store (desde T2 no abre pedidos, detalle ni direcciones)
 - `/specs/03-pos-spec.md` — Especificacion del modulo POS
 - `/specs/04-store-spec.md` — Especificacion del modulo Store
 - `/specs/05-ui-ux-system.md` — Sistema de diseno UI/UX
@@ -45,16 +45,23 @@ Para mantener la integridad del proyecto, se establecen las siguientes reglas:
 - `/specs/12-roadmap.md` — Roadmap (Pendiente)
 - `/specs/13-testing-model.md` — Modelo de testing automatico
 - `/specs/14-migracion-datos.md` — Migracion de datos V1 → V2
+- `/specs/13-pos-wms-url.sql` — Columna `wms_url` (Fase 44 del POS)
+- `/specs/15-store-pedido-seguro.sql` — Tienda T2: `st_crear_pedido`, numero de pedido, `st_direcciones.email`
+- `/specs/16-store-cerrar-acceso-anon.sql` — Tienda T2: sin acceso `anon` a pedidos, detalle y direcciones
+- `/specs/17-store-checkout-coherente.sql` — Tienda T3b: configuracion, zonas de envio, `medio_pago_web`, `st_crear_pedido` v2
+- `/specs/07-wms-spec.md` y `/specs/08-wms-schema.sql` — Modulo WMS
 - `/specs/ARCHITECTURE.md` — Estructura de directorios
 
 ### 6.2 Memoria de IA
 - `/AGENTS.md` — Memoria persistente del proyecto
 - `/CLAUDE.md` — Copia de AGENTS.md (compatibilidad Claude Code)
 - `/CONTEXT.md` — Glosario de dominio del proyecto
+- `/tests/` — Tests del POS (Vitest, `*.test.js`) y de la tienda (`tests/store/*.test.mjs`, `node --test`)
 
 ### 6.3 Apps
 - `/apps/pos/` — Modulo POS (Punto de Venta)
-- `/apps/store/` — Modulo Tienda Virtual
+- `/apps/store/` — Modulo Tienda Virtual (hallazgos y plan en `apps/store/specs/hallazgos-tienda.md`, estado en `apps/store/memory/progress.md`)
+- `/apps/wms/` — Modulo WMS (bodega; ver `apps/wms/AGENTS.md`)
 - `/apps/academy/` — Modulo Academy (Futuro, post-MVP)
 
 ### 6.4 Archivos Informativos (externos, no versionados)

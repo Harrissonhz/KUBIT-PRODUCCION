@@ -2,7 +2,7 @@
 
 Este archivo es la **memoria oficial del proyecto** para cualquier IA que trabaje en el ecosistema Kubit. Contiene las reglas, el stack, las decisiones ya tomadas y el estado actual del desarrollo. Leerlo completo antes de cualquier intervención.
 
-**Ultima actualizacion:** 2026-10-21 — se documentaron las Fases 42 a 44 del POS (secciones 3.1, 5, 7.1, 7.2, 7.3, 11 y 13). Las Fases 30 a 41 se documentaron el 2026-10-18.
+**Ultima actualizacion:** 2026-11-08 — se documento el plan de mejora de la Tienda (fases T1, T2, T3a y T3b, ya en produccion), los scripts SQL 15, 16 y 17 y las tablas y funciones nuevas de la tienda (secciones 3.1, 3.2, 5, 7.2, 7.3, 10.4, 11 y 13). **Antes de tocar `apps/store` o cualquier tabla `st_*`, leer la seccion 5.1 y `apps/store/specs/hallazgos-tienda.md`.** Las Fases 42 a 44 del POS se documentaron el 2026-10-21.
 
 ---
 
@@ -57,7 +57,11 @@ Este archivo es la **memoria oficial del proyecto** para cualquier IA que trabaj
 ├── specs/                 ← Fuente de verdad (Spec-Driven Development)
 │   ├── 01-master-spec.md
 │   ├── 01-schema.sql      ← Esquema completo de la base de datos (en documentos antiguos aparece como 02-database-schema.sql)
+│   ├── 03-seed-store-grants.sql ← Grants del rol anon (desde T2 ya NO abre st_pedidos, st_pedidos_detalle ni st_direcciones)
 │   ├── 13-pos-wms-url.sql ← Fase 44: columna wms_url en pos_configuracion_empresa
+│   ├── 15-store-pedido-seguro.sql      ← Tienda T2: funcion st_crear_pedido, secuencia de numero de pedido, st_direcciones.email
+│   ├── 16-store-cerrar-acceso-anon.sql ← Tienda T2: quita al rol anon el acceso directo a pedidos, detalle y direcciones
+│   ├── 17-store-checkout-coherente.sql ← Tienda T3b: configuracion, zonas de envio, medio_pago_web, st_crear_pedido v2
 │   ├── 03-pos-spec.md
 │   ├── 04-store-spec.md
 │   ├── 05-ui-ux-system.md
@@ -72,7 +76,13 @@ Este archivo es la **memoria oficial del proyecto** para cualquier IA que trabaj
 ├── apps/
 │   ├── pos/               ← Código del módulo POS
 │   ├── store/             ← Código del módulo Tienda Virtual
+│   │   ├── specs/hallazgos-tienda.md ← Hallazgos, decisiones (D1-D28), riesgos y plan T1-T6 de la tienda
+│   │   └── memory/progress.md        ← Estado corto y bitacora de la tienda
+│   ├── wms/               ← Modulo WMS (bodega). Ver apps/wms/AGENTS.md
 │   └── academy/           ← Futuro (post-MVP)
+├── tests/
+│   ├── (vitest)           ← Tests del POS: *.test.js (npm test)
+│   └── store/             ← Tests de la tienda: *.test.mjs (node --test tests/store/*.test.mjs)
 │
 ├── .opencode/skills/      ← Skills para OpenCode
 │   ├── supabase-postgres-best-practices/
@@ -94,10 +104,13 @@ Este archivo es la **memoria oficial del proyecto** para cualquier IA que trabaj
 - **Esquema único:** `public` (default de Supabase)
 - **Prefijo de tablas:**
   - `pos_*` → Módulo POS + tablas core compartidas (25 tablas)
-  - `st_*` → Módulo Store (10 tablas)
+  - `st_*` → Módulo Store (10 tablas del esquema base + 3 de configuracion agregadas en T3b: `st_configuracion`, `st_tarifas_envio`, `st_destinos_envio`)
+  - `wms_*` → Módulo WMS (ver `specs/08-wms-schema.sql` y `apps/wms/AGENTS.md`)
   - `academy_*` → Módulo Academy (futuro)
 - Los módulos comparten tablas base: `pos_productos`, `pos_productos_detalle`, `pos_categorias`, `pos_clientes`, `pos_usuarios`, `pos_roles`, `pos_permisos`, `pos_configuracion_empresa`, `pos_metodos_pago`, `pos_canales_venta`
-- **35 tablas en total** (25 pos_* + 10 st_*)
+- **35 tablas en el esquema base** (`01-schema.sql`: 25 pos_* + 10 st_*) **+ 3 tablas st_* de configuracion de la tienda** (`17-store-checkout-coherente.sql`), sin contar las `wms_*`.
+- **Scripts posteriores al esquema base** (se ejecutan a mano en el SQL Editor de Supabase, primero en QA y luego en produccion; ver `specs/00-bootstrap.sql`): `13-pos-wms-url.sql`, `15-store-pedido-seguro.sql`, `16-store-cerrar-acceso-anon.sql`, `17-store-checkout-coherente.sql`.
+- **Funciones de la tienda (RPC):** `st_crear_pedido`, `st_cotizar_envio`, `st_config_tienda` (publicas, `anon`) y `st_cfg`, `st_zona_envio`, `st_normalizar_texto` (internas). Contratos en `specs/11-api-contracts.md` §9.
 
 ### 3.3 Licenciamiento
 - El SaaS se puede vender **por módulos separados** (POS solo, Store solo, o bundle)
@@ -212,6 +225,28 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 | Llave `service_role` y `config.js` | `apps/pos/js/config.js` va en el repositorio (Vercel sirve el POS desde Git) y lleva SOLO la URL y la llave publica `anon`. La llave `service_role` NUNCA va en el frontend ni en GitHub: `supabaseServiceKey` queda `''`. Por eso crear usuarios y cambiar contrasenas ya no funcionan desde el POS: se hacen en Supabase (Authentication > Users). No copiar `config.js` entre ambientes (QA y produccion tienen el suyo). |
 | Flujo de cambios al POS | Un bug o cambio a la vez. Se prueba primero en la carpeta de pruebas (conectada a la base de QA) y despues se lleva a produccion con un solo commit. Cada despliegue sube la version del cache del service worker (`kubit-pos-YYYYMMDD-NN`). `npm test` debe pasar antes del commit (119 pruebas). POS y Tienda usan Ignored Build Step en Vercel (solo se publican si cambia su carpeta). |
 
+### 5.1 Reglas de la Tienda (apps/store) — vigentes desde T2/T3b (nov 2026)
+
+Estas reglas **reemplazan** lo que digan entradas antiguas de este archivo (por ejemplo "checkout con 7 operaciones REST", `seed-anon-grants-store.sql` o `metodo_pago_id` en pedidos web). El detalle, la evidencia y las decisiones D1-D28 estan en `apps/store/specs/hallazgos-tienda.md`.
+
+| Decision | Valor |
+|---|---|
+| Crear pedidos | **Solo** con la funcion `public.st_crear_pedido(p_nombre, p_celular, p_email, p_direccion, p_ciudad, p_departamento, p_metodo_pago, p_items)` (`security definer`), una transaccion. El navegador envia solo datos del comprador, medio de pago y `[{producto_detalle_id, cantidad}]`; **nunca** precios, totales, cliente ni numero. Prohibido volver a insertar directo en `st_pedidos`, `st_pedidos_detalle`, `st_direcciones` o `pos_clientes` desde la tienda. |
+| Acceso del rol `anon` | Sin SELECT ni INSERT en `st_pedidos`, `st_pedidos_detalle`, `st_direcciones` (script 16) ni en `st_configuracion`, `st_tarifas_envio`, `st_destinos_envio` (script 17). `pos_clientes` conserva lectura publica (RA-01) e insercion anonima (RA-04, temporal; la tienda ya no la usa). |
+| Cliente del pedido web | Siempre el cliente generico **CONSUMIDOR Ecommerce** (`CC 222222222222`; la funcion exige que exista exactamente uno). La tienda no crea ni actualiza clientes. Nombre, celular (10 digitos), correo opcional y direccion del comprador van en `st_direcciones`. Sin cedula en el checkout. |
+| Precio | Siempre `pos_productos_detalle.precio_venta`. Carrito y checkout vuelven a leer el precio al abrirse (`refrescarPreciosCarrito()` en `utils.js`) y avisan si cambio. |
+| Stock | El pedido web **no mueve inventario** y **no se rechaza por stock** (RA-05). Si pide mas de lo disponible queda en `notas`: `Stock insuficiente: SKU (pedido N, disponible M)` y la confirmacion **no muestra instrucciones de pago**. La venta real se registra a mano en el POS. |
+| Numero de pedido | `KBT-AAAAMM-NNNNNN` con la secuencia `st_pedidos_numero_seq` (consecutivo global, no reinicia por mes) e indice unico `ux_st_pedidos_numero_pedido`. |
+| Medio de pago | Columna propia `st_pedidos.medio_pago_web` (`transferencia`, `mercado_pago`, `contraentrega`). **No se usa `pos_metodos_pago`** (el POS la lista al vender; agregar valores ahi cambiaria el POS). El valor antiguo `tarjeta` se guarda como `mercado_pago`. |
+| Envio | Por zonas: `st_tarifas_envio` (local, antioquia, nacional_principal, nacional, especial: valor y dias) y `st_destinos_envio` (departamento/ciudad → zona). Regla: ciudad exacta > departamento completo > `envio_zona_defecto` (`nacional`). Comparacion sin tildes ni mayusculas. Contraentrega sin recargo. |
+| Envio gratis y minimo | Sobre el **subtotal de productos sin envio**: gratis desde `envio_gratis_desde` (80000) y minimo `pedido_minimo` (15000) en `st_configuracion`. Si se cambian, actualizar tambien los montos escritos en `terminos-condiciones.html` y `preguntas-frecuentes.html`. |
+| Datos de pago | `st_configuracion`: `bre_b_llave`, `bre_b_titular`, `bre_b_qr_url` (opcional), `mercado_pago_link` (Tu Link, monto libre), `whatsapp`. Solo los devuelve `st_crear_pedido` despues de crear el pedido. Se cambian **por SQL** (`update public.st_configuracion set valor = ... where clave = ...`); hoy no hay pantalla (ST-31). |
+| Errores de la funcion | Mensajes en espanol con prefijo `[ST_xxx]` (`ST_NOMBRE`, `ST_CELULAR`, `ST_EMAIL`, `ST_DIRECCION`, `ST_UBICACION`, `ST_PAGO`, `ST_ITEMS`, `ST_CONFIG`, `ST_LIMITE`, `ST_MINIMO`). `checkout.js::mensajeErrorPedido()` muestra solo el texto. |
+| Credenciales por ambiente | Nunca se copian entre `KUBIT-Pruebas` (QA) y `KUBIT-PRODUCCION`: `apps/pos/js/config.js`, `apps/wms/js/config.js` y `apps/store/js/api/supabase-client.js`. `tests/store/ambiente.test.mjs` falla si la tienda apunta a otro proyecto que el POS/WMS del mismo repo o si su llave no es `anon` (ST-29). |
+| Despliegue de cambios con SQL | 1) script en QA, 2) frontend en `KUBIT-Pruebas` y pruebas, 3) script en produccion, 4) valores reales por `UPDATE` si aplica, 5) commit con `git add` por archivo (nunca `git add .`), 6) prueba de humo, 7) borrar pedidos de prueba en un solo bloque `begin; ... commit;`. Un script que **cierra** permisos va despues de publicar el frontend (caso del 16). |
+| Tests de la tienda | `node --test tests/store/*.test.mjs` (111 casos) ademas de `npm test` (Vitest, 119). Los `.mjs` usan `node:test` + `node:vm` y no tocan la base; los SQL se validan como texto y su ejecucion real se prueba en QA. Vitest solo toma `tests/**/*.test.js`. |
+| Cache de la tienda | `apps/store/service-worker.js`: `outletshop-YYYYMMDD-NN`, se sube en cada deploy de la tienda. Vigente: `outletshop-20261108-02`. |
+
 ---
 
 ## 6. Límites del Plan Gratuito de Supabase
@@ -243,6 +278,8 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 - [x] `ARCHITECTURE.md` — Estructura de directorios
 - [x] `AGENTS.md` — Memoria persistente (este archivo)
 - [x] `CONTEXT.md` — Glosario de dominio del proyecto
+- [x] `apps/store/specs/hallazgos-tienda.md` — Hallazgos, decisiones, riesgos aceptados y plan T1-T6 de la tienda (v5)
+- [x] `15-store-pedido-seguro.sql`, `16-store-cerrar-acceso-anon.sql`, `17-store-checkout-coherente.sql` — Scripts de la tienda (T2 y T3b), ejecutados en QA y produccion
 
 ### 7.2 Completado (Implementación)
 
@@ -254,7 +291,7 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 - [x] `producto.js` — Async detalle producto + relacionados
 - [x] Todas las páginas migradas: `data.js` → `supabase-client.js`
 - [x] `MigracionProductos.sql` — DML generado automáticamente (100 productos, 1158 INSERTs total: 100 pos_productos + 100 detalle + 958 multimedia)
-- [x] `checkout.js` — Guest checkout: crea pedidos via REST API directa (`__supabase.post()`) con 7 operaciones secuenciales (canal Web, cliente, dirección, pedido, detalle). Sin Edge Functions
+- [x] `checkout.js` — ~~Guest checkout con 7 operaciones REST secuenciales~~ **(OBSOLETO desde T2, 2026-11-03):** el pedido se crea con una sola llamada a `st_crear_pedido`. Ver §5.1 y el bloque "Modulo Store — Plan de mejora T1 a T3b" abajo.
 - [x] **Favicon SVG**: `<link rel="icon" type="image/svg+xml" href="img/icon.svg">` agregado en las 8 páginas HTML
 - [x] **Navbar fixed**: `navbar-store.js` cambiado de `sticky` a `fixed top-0 left-0 right-0 z-50 w-full` para que el navbar (logo, búsqueda, redes, carrito) permanezca visible al scrollear en todas las páginas. `pt-14` agregado al `<main>` wrapper para compensar altura.
 - [x] **icon2.svg**: Nuevo archivo de icono minimalista (bolsa/tienda) para uso futuro
@@ -400,6 +437,33 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 - [x] Fix: Menú hamburguesa roto en herramientas.html (sidebar.js no existía) y renombrar-archivos.html (no incluía el script)
 - [x] Tests: `npm test` → 99 passed, 0 failures
 
+#### Modulo Store — Plan de mejora T1 a T3b (oct-nov 2026)
+
+Detalle completo en `apps/store/specs/hallazgos-tienda.md` (hallazgos ST-01 a ST-31, riesgos RA-01 a RA-05, decisiones D1-D28).
+
+**T1 — Correcciones rapidas (2026-10-28, `f7ce184`, cache `outletshop-20261028-01`)**
+- [x] Carrito y pedido por variante (`detalleId`), precio propio por variante, variantes agotadas y eliminadas no se compran, "Elegir opcion" y "Desde $X" en la grilla (ST-01, 02, 03, 25, 26, 27, 28).
+- [x] `tests/store/store-t1.test.mjs`.
+
+**T2 — Pedido seguro (2026-11-03, `b3bc908`, cache `outletshop-20261030-01`)**
+- [x] `specs/15-store-pedido-seguro.sql`: `st_crear_pedido` (transaccion unica, precio del POS, cliente CONSUMIDOR Ecommerce, limite de 5 pedidos PENDIENTE por celular en 24 h, aviso de stock en `notas`), secuencia `st_pedidos_numero_seq`, indice unico de `numero_pedido`, columna `st_direcciones.email` (ST-04, 07, 08).
+- [x] `specs/16-store-cerrar-acceso-anon.sql`: sin acceso `anon` a `st_pedidos`, `st_pedidos_detalle`, `st_direcciones` (ST-05). `03-seed-store-grants.sql` ya no lo reabre.
+- [x] Checkout: celular obligatorio, correo opcional, sin cedula; carrito y checkout releen el precio del POS.
+- [x] ST-29: la tienda de Pruebas apuntaba a produccion; regla de los 3 archivos de credenciales y `tests/store/ambiente.test.mjs`.
+- [x] Tests `tests/store/_entorno.mjs`, `store-t2.test.mjs`, `ambiente.test.mjs`.
+
+**T3a — WhatsApp y paginacion (2026-11-08, `92dc65b` y `272bc1d`, cache `outletshop-20261108-01`)**
+- [x] Boton "Preguntar por WhatsApp" en la ficha (logo completo de WhatsApp) con producto, opcion, SKU, precio y enlace; el boton flotante usa el mismo mensaje (ST-12).
+- [x] Paginacion con orden aleatorio fijo por visita (semilla en `sessionStorage`) sin repetir ni ocultar productos (ST-13).
+- [x] `tests/store/store-t3a.test.mjs`.
+
+**T3b — Checkout coherente (2026-11-08, `679251a`, cache `outletshop-20261108-02`)**
+- [x] `specs/17-store-checkout-coherente.sql`: `st_configuracion`, `st_tarifas_envio`, `st_destinos_envio`, `st_pedidos.medio_pago_web`, funciones `st_config_tienda`, `st_cotizar_envio`, `st_cfg`, `st_zona_envio`, `st_normalizar_texto` y `st_crear_pedido` v2 (misma firma) con envio por zona, envio gratis, pedido minimo e instrucciones de pago (ST-09, 10, 11).
+- [x] Checkout con 3 medios (Transferencia Bre-B, Tarjeta via Mercado Pago, Contraentrega), envio y dias al elegir ciudad, barra de envio gratis, aviso de minimo y confirmacion con "Copiar" la llave, "Pagar con Mercado Pago" y "Confirmar por WhatsApp".
+- [x] Carrito con barra de envio gratis y aviso de minimo. Terminos y preguntas frecuentes alineados con el checkout.
+- [x] Produccion: tarifas reales cargadas por `UPDATE` (local $15.000, Antioquia $18.000, ciudades principales $25.000, nacional $30.000, zonas especiales $42.000), llave Bre-B, titular y Tu Link configurados en `st_configuracion`.
+- [x] `tests/store/store-t3b.test.mjs` (total tienda: 111 casos).
+
 ### 7.3 Pendiente
 - [ ] `06-academy-spec.md` — Especificación del módulo Academy (post-MVP)
 - [x] Migrar datos Fase 1: ejecutar scripts `01-migrate-usuarios.sql` → `08-migrate-gastos-mensuales-detalle.sql` en orden FK
@@ -417,6 +481,10 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 - [ ] Bug #16: "Rentabilidad TOTAL" suma `ventas_netas`.
 - [ ] Bug #17: editar una venta de la ultima unidad (la validacion de stock no suma las unidades de la original).
 - [ ] Revision de seguridad en detalle (a tratar aparte).
+- [ ] Tienda T4 (ST-15): pedidos web en el POS (contador en el menu, tarjeta en el Panel, `pedidos-web.html`, estados, pago, guia, asignar cliente real, "Crear venta en POS").
+- [ ] Tienda ST-31: pantalla para editar `st_configuracion` y tarifas de envio sin SQL (hoy solo por `UPDATE`). Requiere funciones que validen administrador; las tablas no estan abiertas a `authenticated`.
+- [ ] Tienda T5 (ST-16 a ST-21) y T6 (ST-22, 23, 24, 30 y decision final de RA-04). Ver `apps/store/specs/hallazgos-tienda.md` §7.
+- [ ] Skills `.claude/skills/kubit-store/SKILL.md` y `.opencode/skills/kubit-store/SKILL.md`: revisar que no indiquen el checkout de 7 operaciones REST.
 
 ### 7.5 Completado (Documentacion de Migracion)
 - [x] `specs/14-migracion-datos.md` — Spec completo de migracion V1→V2 con analisis campo a campo de 8 tablas (actualizado con Fase 2 y Fase 3)
@@ -630,6 +698,7 @@ Cada fase indica que cambio, los archivos y la version del cache. Commits entre 
 - [x] Se corrigieron en produccion las filas de `pos_finanzas_mensuales` de ago, sep y oct 2026 para que cuadren con `pos_ventas` (ver §5 y `specs/03-pos-spec.md` §3.6.2). Nov 2025 no se toca (ventas importadas desde CSV).
 
 ### 7.4 Próximo Paso Recomendado
+**Tienda:** T4 (pedidos web en el POS), que tambien puede incluir ST-31 (pantalla de configuracion de la tienda).
 **Despues del deploy:** Integración con MercadoLibre para sincronizar productos y pedidos.
 
 ---
@@ -693,6 +762,12 @@ Cada fase indica que cambio, los archivos y la version del cache. Commits entre 
 - [x] No ejecutar `git rm --cached` sobre `config.js` (el POS perderia la conexion)
 - [x] `config.ejemplo.js` conserva textos de ejemplo, sin llaves reales
 - [ ] Revision de seguridad en detalle: pendiente
+
+### 10.4 Credenciales por ambiente (Tienda y WMS, 2026-10-29)
+- Hay **3 archivos de credenciales** y cada carpeta tiene los suyos: `apps/pos/js/config.js`, `apps/wms/js/config.js` y `apps/store/js/api/supabase-client.js`. `KUBIT-Pruebas` apunta a QA (`gbjtdjbopwgbknklwldq`) y `KUBIT-PRODUCCION` a produccion (`gxqcybboiskwznxdioun`).
+- **Nunca se copian entre carpetas.** Las listas de copia de Pruebas a Produccion los excluyen y los commits se hacen con `git add` por archivo. Verificacion: `diff -rq --strip-trailing-cr --exclude=.git --exclude=node_modules --exclude=.vercel KUBIT-PRODUCCION KUBIT-Pruebas` debe mostrar solo esos 3 archivos.
+- Si un `supabase-client.js` quedo con el ambiente equivocado: `git restore --source=HEAD -- apps/store/js/api/supabase-client.js`.
+- Antes del commit: `git diff --cached | grep -c "eyJ"` debe dar 0 (excepto cuando el commit incluye `tests/store/ambiente.test.mjs`, que contiene `eyJ` dentro de una expresion regular).
 
 ---
 
@@ -1066,7 +1141,7 @@ Cada fase indica que cambio, los archivos y la version del cache. Commits entre 
 - **Icon-only action columns:** Todos los botones de accion (Ver, Editar, Eliminar) en todas las paginas POS son icon-only (SVG + aria-label). No hay texto visible. Esto garantiza que en mobile las columnas de accion ocupen el minimo espacio necesario. Los iconos siguen el patron: pencil (Editar), trash (Eliminar), eye (Ver), con colores sky-500 (editar) y red-400 (eliminar).
 - **KPI Bar en ventas.html:** Los indicadores del dia (Ventas Hoy, Total Hoy, Promedio) se renderizan como barra compacta de 30px entre el header y el formulario, NO como cards. Esto evita romper el patron `<details>` colapsable y no compite visualmente con los botones de canal. La actualizacion es inmediata post-venta (sin cache, query agregado PostgREST que devuelve 1 fila). Fallback silencioso a `—` si la API falla.
 - **Codigo interno en modal de historial:** Se renderiza condicionalmente via `<span class="text-xs text-slate-400 font-mono w-20 truncate">` solo si `d.detalle.codigo_interno` existe. Sin cambios en HTML ni DB porque `sm:max-w-4xl` (896px) ya tiene espacio y los datos ya vienen en el join existente de `database.js`.
-- **Store checkout sin Edge Functions:** El modulo Store NO usa Supabase Edge Functions. El flujo de checkout (`checkout.js`) opera 100% via REST API directa a PostgREST usando `__supabase.post()` y `__supabase.get()`, con la anon key. Requiere grants INSERT + RLS policies para rol `anon` en `pos_clientes`, `st_direcciones`, `st_pedidos` y `st_pedidos_detalle`. Ver `specs/seed-anon-grants-store.sql`. El `canal_id` se obtiene consultando `pos_canales_venta` donde `codigo = 'web'`.
+- **(OBSOLETO desde T2, 2026-11-03 — ver §5.1)** **Store checkout sin Edge Functions:** El modulo Store NO usa Supabase Edge Functions. El flujo de checkout (`checkout.js`) opera 100% via REST API directa a PostgREST usando `__supabase.post()` y `__supabase.get()`, con la anon key. Requiere grants INSERT + RLS policies para rol `anon` en `pos_clientes`, `st_direcciones`, `st_pedidos` y `st_pedidos_detalle`. Ver `specs/seed-anon-grants-store.sql`. El `canal_id` se obtiene consultando `pos_canales_venta` donde `codigo = 'web'`.
 - **Tags de producto como text[] con toggle chips:** `pos_productos.tags` es un array `text[]` con GIN index. En el POS se seleccionan via toggle chips (no free text) para garantizar lowercase exacto. Los valores validos son: `nuevo`, `destacado`, `oferta`, `super-oferta`, `remate`, `mas_vendido`, `liquidacion`, `imperdible`, `agotado`.
 - **Badge system del Store:** Los tags de producto se renderizan como badges visuales en las cards del catalogo. La funcion `obtenerBadges()` en `card-producto.js` itera `producto.tags[]` y mapea cada tag a un badge con icono y color CSS. Los badges se apilan verticalmente (`flex-col gap-1.5`). La prioridad "Agotado" oculta los demas badges. Los tags `oferta`, `super-oferta` y `remate` se agrupan bajo un unico badge "Oferta". Los tags deben coincidir EXACTAMENTE en lowercase con `badgeMap` en `card-producto.js:5-13`. **Stock check:** `obtenerBadges()` calcula `stockTotal` sumando `variantes[].stock` (multi-variante) o usando `producto.stock` (variante unica). Si stock ≤ 0, badge "Agotado" es prioritario sobre cualquier otro.
 - **Tags lowercase obligatorio en DB:** El `data-tag` en chips POS usa minusculas. Los tags se almacenan exactamente asi en `pos_productos.tags[]`. El Store filtra y mapea comparando con `badgeMap` usando `tags.indexOf('destacado')` — cualquier diferencia de case rompe el badge. Los 3 chips de oferta son: `nuevo`, `destacado`, `oferta`. Ademas hay chips adicionales: `mas_vendido`, `liquidacion`, `imperdible`.
@@ -1149,8 +1224,8 @@ Cada fase indica que cambio, los archivos y la version del cache. Commits entre 
 | Navbar fixed | `navbar-store.js`: `fixed top-0 left-0 right-0 z-50 w-full` + `pt-14` en `<main>` |
 | Favicon Store | `apps/store/*.html`: `<link rel="icon" type="image/svg+xml" href="img/icon.svg">` |
 | Iconos Store | `apps/store/img/icon.svg` (complejo), `icon2.svg` (minimalista bolsa) |
-| Store checkout (REST) | `checkout.js`, `__supabase.post()`, 7 operaciones secuenciales (canal, cliente, direccion, pedido, detalle) |
-| Grants anon Store | `specs/seed-anon-grants-store.sql`, `pos_clientes`, `st_direcciones`, `st_pedidos`, `st_pedidos_detalle` |
+| Store checkout | `checkout.js::confirmarPedido()`, `__supabase.rpc('st_crear_pedido', ...)`, una sola llamada (desde T2; las 7 operaciones REST quedaron obsoletas) |
+| Grants anon Store | `specs/03-seed-store-grants.sql` y `specs/16-store-cerrar-acceso-anon.sql`: `anon` sin acceso a `st_pedidos`, `st_pedidos_detalle`, `st_direcciones`; `pos_clientes` con lectura publica (RA-01) e insercion (RA-04) |
 | POS PWA service worker | `apps/pos/service-worker.js`, skipWaiting, clients.claim, cache-first, rutas relativas |
 | POS iOS meta tags | `apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style`, apple-touch-icon, 17 paginas |
 | POS SW registration | `navigator.serviceWorker.register`, 17 paginas POS |
@@ -1293,6 +1368,20 @@ Cada fase indica que cambio, los archivos y la version del cache. Commits entre 
 | IVA 0% (exento) | `productos.js` y `configuracion.js` respetan el 0; no usar `\|\|` con valor por defecto 0.19 (Fases 32-33). |
 | Buscar orden de compra por Notas | `compras.js::filtrarYRender()` incluye `c.notas` (Fase 38). |
 | service_role fuera del frontend | `apps/pos/js/config.js` con `supabaseServiceKey: ''` (commit `8bde21d`); crear usuario y cambiar contrasena se hacen en Supabase. |
+| Plan de mejora de la Tienda | `apps/store/specs/hallazgos-tienda.md` (ST-01..ST-31, RA-01..RA-05, D1..D28, T1..T6), `apps/store/memory/progress.md` |
+| st_crear_pedido | `specs/15-store-pedido-seguro.sql` (v1) y `specs/17-store-checkout-coherente.sql` (v2, vigente); contrato en `specs/11-api-contracts.md` §9.1 |
+| Envio por zonas | `st_tarifas_envio`, `st_destinos_envio`, `st_zona_envio()`, `st_cotizar_envio()`, `checkout.js::cotizarEnvio()` |
+| Configuracion de la tienda | `st_configuracion` (envio_gratis_desde, pedido_minimo, envio_zona_defecto, bre_b_llave, bre_b_titular, bre_b_qr_url, mercado_pago_link, whatsapp), `st_cfg()`, `st_config_tienda()`, `utils.js::obtenerConfigTienda()` |
+| Medio de pago web | `st_pedidos.medio_pago_web` (transferencia, mercado_pago, contraentrega); NO `pos_metodos_pago` |
+| Cliente generico web | `pos_clientes` CONSUMIDOR Ecommerce, `CC 222222222222` |
+| Numero de pedido web | `st_pedidos_numero_seq`, `ux_st_pedidos_numero_pedido`, formato `KBT-AAAAMM-NNNNNN` |
+| Aviso de stock en pedido web | `notas` con `Stock insuficiente: ...`; respuesta `stock_insuficiente: true` oculta las instrucciones de pago (RA-05, D28) |
+| Confirmacion del pedido web | `checkout.js::htmlConfirmacion()`, `htmlInstruccionesPago()`, `mensajeWhatsAppPedido()`, boton `[data-copiar]` |
+| Preguntar por WhatsApp (ficha) | `producto.js::mensajeWhatsAppProducto()`, `urlWhatsAppProducto()`, `#btn-whatsapp-producto` |
+| Paginacion por visita | `productos.js::_ordenSesion()`, `_semillaSesion()`, `sessionStorage` clave `kubit_orden_semilla` |
+| Precios vigentes en carrito | `utils.js::refrescarPreciosCarrito()`, `avisoCambiosCarrito()` |
+| Tests de la tienda | `tests/store/*.test.mjs`, `node --test`, `_entorno.mjs` |
+| Credenciales por ambiente | `config.js` (POS y WMS), `supabase-client.js` (tienda), `tests/store/ambiente.test.mjs`, AGENTS.md §10.4 |
 
 ## 13. Registro de Cambios (continuacion)
 
@@ -1599,3 +1688,15 @@ Cada fase indica que cambio, los archivos y la version del cache. Commits entre 
 | `specs/03-pos-spec.md` | Encabezado, diagrama ER y catalogo (`store_url`, `wms_url`), 3.3.3, 3.3.4, 9.4 y la seccion 13 (nuevas 12.5 y 12.6). |
 | `specs/11-api-contracts.md` | 3.12.1 y nueva 3.12.2 (`store_url`, `wms_url`). |
 | `AGENTS.md`, `CLAUDE.md` y `specs/ARCHITECTURE.md` | Secciones 3.1, 5, 7.1, 7.2, 7.3 y 11 (reglas nuevas, Fases 42 a 44, pendiente de Stock Bajo cerrado). El esquema pasa a nombrarse `01-schema.sql` (nombre real en el repositorio; las entradas historicas conservan el nombre antiguo). |
+
+### 2026-11-08 — Tienda: plan de mejora T1 a T3b documentado
+
+| Archivo | Cambio |
+|---|---|
+| `AGENTS.md` y `CLAUDE.md` | Encabezado; §3.1 (scripts 15-17, hallazgos, progress, apps/wms, tests/store); §3.2 (tablas st_* de configuracion, scripts posteriores, funciones de la tienda); nueva §5.1 (reglas de la tienda); §7.1, §7.2 (bloque T1 a T3b), §7.3, §7.4; nueva §10.4 (credenciales por ambiente); §11 (keywords); entradas antiguas del checkout de 7 operaciones marcadas como obsoletas. |
+| `specs/04-store-spec.md` | §3.4 checkout reescrito, nuevas §3.9 (envios) y §3.10 (pagos), §5.3 reescrita, nueva §2.6 (tablas y columnas de T2/T3b). |
+| `specs/11-api-contracts.md` | §4.3.1 y §6 marcados como obsoletos; nueva §9 (RPC de la tienda). |
+| `specs/00-bootstrap.sql`, `specs/01-master-spec.md`, `specs/ARCHITECTURE.md`, `specs/12-roadmap.md`, `specs/13-testing-model.md` | Scripts 13, 15, 16 y 17; tests de la tienda; estado de la tienda. |
+| `apps/store/specs/hallazgos-tienda.md` (v5) y `apps/store/memory/progress.md` | T3b hecho (`679251a`), tarifas reales, ST-31, OP-03. |
+| **SQL (ejecutado por el usuario)** | 15 y 16 (2026-11-03) y 17 + valores reales en `st_configuracion` y `st_tarifas_envio` (2026-11-08), en QA y produccion. |
+| Tests | `node --test tests/store/*.test.mjs` → 111 passed; `npm test` → 119 passed. |

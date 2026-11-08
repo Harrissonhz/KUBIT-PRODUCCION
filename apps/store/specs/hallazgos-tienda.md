@@ -1,6 +1,6 @@
 # hallazgos-tienda.md — Hallazgos y plan de mejora de la Tienda (apps/store)
 
-**Versión:** v4 · **Fecha:** 2026-11-08 · **Responsable:** Harrisson Zapata
+**Versión:** v5 · **Fecha:** 2026-11-08 · **Responsable:** Harrisson Zapata
 **Alcance:** código de `apps/store` vigente en producción (`outletshop`), políticas RLS reales de producción y decisiones de negocio.
 **Base de datos:** una sola base Supabase por ambiente; prefijos `pos_` (POS), `st_` (Tienda) y `wms_` (WMS). QA = `gbjtdjbopwgbknklwldq`, producción = `gxqcybboiskwznxdioun`.
 
@@ -66,9 +66,9 @@
 | ST-06 | No se valida stock en carrito ni checkout | — | — | — | — | Aceptado (RA-05) |
 | ST-07 | Número de pedido aleatorio con riesgo de colisión | P1 | Bajo | S | T2 | Hecho 2026-11-03 |
 | ST-08 | Cliente creado con NIT inventado y reconocido solo por correo | P1 | Medio | M | T2 | Hecho 2026-11-03 |
-| ST-09 | Envío fijo e incoherente entre carrito y checkout | P1 | Alto | M | T3b | En curso (QA) |
-| ST-10 | Promesas falsas: pago con tarjeta y correo de confirmación | P1 | Alto | S | T3b | En curso (QA; correo resuelto en T2) |
-| ST-11 | Sin pantalla de confirmación con instrucciones de pago ni WhatsApp | P1 | Alto | M | T3b | En curso (QA) |
+| ST-09 | Envío fijo e incoherente entre carrito y checkout | P1 | Alto | M | T3b | Hecho 2026-11-08 |
+| ST-10 | Promesas falsas: pago con tarjeta y correo de confirmación | P1 | Alto | S | T3b | Hecho 2026-11-08 |
+| ST-11 | Sin pantalla de confirmación con instrucciones de pago ni WhatsApp | P1 | Alto | M | T3b | Hecho 2026-11-08 |
 | ST-12 | WhatsApp de la ficha abre un chat vacío | P1 | Alto | S | T3a | Hecho 2026-11-08 |
 | ST-13 | Paginación con barajado repite y oculta productos | P1 | Medio | S | T3a | Hecho 2026-11-08 |
 | ST-14 | Caracteres dañados en textos visibles | — | — | — | — | Cerrado (falso positivo) |
@@ -88,6 +88,7 @@
 | ST-28 | La grilla no indica que las variantes tienen precios distintos | P1 | Medio | S | T1 | Hecho 2026-10-28 |
 | ST-29 | El ambiente de pruebas de la tienda apuntaba a la base de producción | P0 | — | S | T2 | Hecho 2026-11-03 |
 | ST-30 | Políticas de `st_envios` y `st_pagos_online` dependen de `st_pedidos` | P3 | Bajo | S | T3/T4 | Pendiente (revisar al usarlas) |
+| ST-31 | La configuración de la tienda (tarifas, envío gratis, mínimo, llave, link) solo se cambia por SQL | P2 | Bajo | M | T4 (propuesto) | Pendiente |
 | RA-01 | Lectura pública de `pos_clientes` (Ley 1581) | — | — | — | — | Aceptado |
 | RA-02 | Reseñas y calificación ficticias en la portada | — | — | — | — | Aceptado |
 | RA-03 | Envío gratis desde $80.000 también en zonas remotas | — | — | — | — | Aceptado |
@@ -138,23 +139,24 @@
 - **Solución aplicada (D11, D16):** la tienda ya no crea ni actualiza clientes. Todo pedido web queda a nombre de **CONSUMIDOR Ecommerce** (`CC 222222222222`); la función exige que exista exactamente uno (si no, aborta sin crear nada). Los datos reales del comprador quedan en `st_direcciones` (`nombre_destinatario`, `telefono` con 10 dígitos, `email` nueva columna opcional, dirección). Se corrigió un segundo cliente (Daniel Castaño) que tenía el mismo número.
 - **Consecuencia aceptada:** el sistema no reconoce automáticamente a quien compra de nuevo; los pedidos web se agrupan bajo el cliente genérico hasta asignarlos a uno real en el POS (T4).
 
-### ST-09 · Envío fijo e incoherente — P1 · Ventas: Alto · En curso (T3b, QA)
+### ST-09 · Envío fijo e incoherente — P1 · Ventas: Alto · ✅ Hecho (T3b)
 - **Evidencia (antes):** `carrito.html` mostraba "Por calcular" y no lo sumaba; el checkout y `st_crear_pedido` usaban $9.900 fijos.
-- **Solución (T3b, D26–D27):** `specs/17-store-checkout-coherente.sql`:
+- **Solución aplicada (D26–D27):** `specs/17-store-checkout-coherente.sql`:
   - `st_tarifas_envio` (5 zonas: `local`, `antioquia`, `nacional_principal`, `nacional`, `especial`; valor y días) y `st_destinos_envio` (departamento y ciudad → zona). Comparación sin tildes ni mayúsculas; ciudad exacta > departamento > zona por defecto. "Barbosa" solo es local en Antioquia.
   - `st_configuracion`: `envio_gratis_desde` (80000), `pedido_minimo` (15000), `envio_zona_defecto`.
   - `st_cotizar_envio(departamento, ciudad)` (solo lectura, `anon`): el checkout muestra valor y "Llega en N–M días hábiles" al elegir la ciudad.
   - `st_crear_pedido` (misma firma) calcula el envío de la zona, gratis desde el umbral (subtotal sin envío) y rechaza pedidos bajo el mínimo (`[ST_MINIMO]`).
   - Carrito y checkout: barra "Te faltan $X para envío gratis" y aviso de pedido mínimo (`st_config_tienda`).
-- **Valores de QA ficticios:** local $8.000 (1–2 días), Antioquia $12.000 (2–3), ciudades principales $15.000 (3–4), nacional $18.000 (3–6), especiales $35.000 (5–10). Antes de producción se reemplazan por los reales con `UPDATE` (al pie del script 17).
+- **Tarifas en producción (2026-11-08):** local $15.000 (1–2 días), Antioquia $18.000 (2–3), ciudades principales $25.000 (3–4), nacional $30.000 (3–6), zonas especiales $42.000 (5–10). QA conserva valores de prueba ($8.000 a $35.000). Se cambian por SQL (`update public.st_tarifas_envio ...`).
+- **Evidencia QA:** `st_cotizar_envio` devolvió local para Itagüí, nacional para Barbosa (Santander) y especial para Leticia; pedidos `KBT-202611-000006` a `-000010` con envío de zona, envío gratis desde $80.000 y `medio_pago_web` correcto.
 - **Archivos:** `specs/17-store-checkout-coherente.sql`, `checkout.html`, `js/paginas/checkout.js`, `carrito.html`, `js/paginas/carrito.js`, `js/compartido/utils.js`.
 
-### ST-10 · Promesas falsas en el checkout — P1 · Ventas: Alto · En curso (T3b, QA)
+### ST-10 · Promesas falsas en el checkout — P1 · Ventas: Alto · ✅ Hecho (T3b)
 - **Avance T2:** el mensaje final ya no promete correo.
-- **Solución (T3b, D23–D24):** solo 3 medios reales: Transferencia Bre-B, Tarjeta débito/crédito vía Mercado Pago y Contraentrega, guardados en `st_pedidos.medio_pago_web` (`pos_metodos_pago` no se toca; el valor `tarjeta` del checkout anterior se acepta como `mercado_pago`). Se corrigieron `terminos-condiciones.html` (compra sin registro, mínimo $15.000 sin envío, envío gratis desde $80.000, medios reales, factura por WhatsApp o a consumidor final) y `preguntas-frecuentes.html` (medios reales, envío gratis $80.000, guía por WhatsApp, días según la ciudad).
+- **Solución aplicada (D23–D24):** solo 3 medios reales: Transferencia Bre-B, Tarjeta débito/crédito vía Mercado Pago y Contraentrega, guardados en `st_pedidos.medio_pago_web` (`pos_metodos_pago` no se toca; el valor `tarjeta` del checkout anterior se acepta como `mercado_pago`). Se corrigieron `terminos-condiciones.html` (compra sin registro, mínimo $15.000 sin envío, envío gratis desde $80.000, medios reales, factura por WhatsApp o a consumidor final) y `preguntas-frecuentes.html` (medios reales, envío gratis $80.000, guía por WhatsApp, días según la ciudad).
 
-### ST-11 · Sin pantalla de confirmación útil — P1 · Ventas: Alto · En curso (T3b, QA)
-- **Solución (T3b, D24–D25, D28):** la confirmación muestra número, total, envío (o "envío gratis"), días estimados y, según el medio: llave Bre-B con botón "Copiar", titular, valor exacto y referencia (QR opcional); o "Paga exactamente $X" y botón "Pagar con Mercado Pago" (Tu Link, monto libre); o "Pagas $X en efectivo al recibir". Si hay stock insuficiente no muestra instrucciones de pago. Botón "Confirmar por WhatsApp" con "Hola, acabo de hacer el pedido KBT-… por $X.". La llave y el link solo los devuelve `st_crear_pedido` (D4).
+### ST-11 · Sin pantalla de confirmación útil — P1 · Ventas: Alto · ✅ Hecho (T3b)
+- **Solución aplicada (D24–D25, D28):** la confirmación muestra número, total, envío (o "envío gratis"), días estimados y, según el medio: llave Bre-B con botón "Copiar", titular, valor exacto y referencia (QR opcional); o "Paga exactamente $X" y botón "Pagar con Mercado Pago" (Tu Link, monto libre); o "Pagas $X en efectivo al recibir". Si hay stock insuficiente no muestra instrucciones de pago (evidencia QA: `KBT-202611-000010`, AL033 pedido 20 y disponible 1). Botón "Confirmar por WhatsApp" con "Hola, acabo de hacer el pedido KBT-… por $X.". La llave y el link solo los devuelve `st_crear_pedido` (D4).
 - **Archivos:** `checkout.html`, `js/paginas/checkout.js`, `specs/17-store-checkout-coherente.sql`.
 
 ### ST-12 · WhatsApp de la ficha sin contexto — P1 · Ventas: Alto · ✅ Hecho (T3a)
@@ -164,7 +166,7 @@
 
 ### ST-13 · Paginación con barajado — P1 · Ventas: Medio · ✅ Hecho (T3a)
 - **Evidencia:** `js/api/productos.js` barajaba todo el catálogo en cada carga y luego cortaba por página.
-- **Solución aplicada (D22):** `obtenerPaginados` ordena por `id` y baraja con una semilla guardada en `sessionStorage`: en una visita las páginas no repiten ni ocultan productos; en otra visita el orden cambia. Destacados, relacionados y búsqueda sin cambios.
+- **Solución aplicada (D22):** `obtenerPaginados` ordena por `id` y baraja con una semilla guardada en `sessionStorage` (`kubit_orden_semilla`): en una visita las páginas no repiten ni ocultan productos; en otra visita el orden cambia. Destacados, relacionados y búsqueda sin cambios.
 
 ### ST-14 · Caracteres dañados — Cerrado (falso positivo, 2026-10-28)
 - Las tildes se ven bien en producción ("Presentación", "Cojín", "Navideña"). El daño venía del visor de OneDrive usado en el levantamiento, no de los archivos.
@@ -240,6 +242,13 @@
 - **Evidencia (producción, 2026-11-03):** las políticas `clientes ven envios de sus pedidos` (`st_envios`) y `clientes ven pagos de sus pedidos` (`st_pagos_online`) consultan `st_pedidos`. Ambas tablas están vacías y ningún archivo de `apps` las usa.
 - **Impacto hoy:** ninguno. Después del script 16, una lectura **anónima** de esas tablas fallaría por permisos sobre `st_pedidos`.
 - **Mitigación:** revisar roles y políticas cuando T3 o T4 empiecen a usar envíos o pagos en línea.
+### ST-31 · Configuración de la tienda solo por SQL — P2 · Ventas: Bajo · Pendiente
+- **Situación (2026-11-08):** `st_configuracion` (envío gratis, pedido mínimo, zona por defecto, llave Bre-B, titular, QR, link de Mercado Pago, WhatsApp), `st_tarifas_envio` y `st_destinos_envio` solo se editan con `UPDATE`/`INSERT` en el SQL Editor de Supabase. D8 había previsto que el umbral fuera "configurable en el POS"; en T3b se dejó por SQL para no tocar el POS.
+- **Restricciones para construirla:**
+  - El script 17 revocó el acceso a esas tablas para `anon` **y** `authenticated`: una pantalla en el POS necesita funciones `security definer` que verifiquen que el usuario es administrador (no basta con abrir las tablas).
+  - `terminos-condiciones.html` y `preguntas-frecuentes.html` tienen escritos "$15.000" y "$80.000": si los valores se editan desde una pantalla, esos textos deben leerse de la configuración o actualizarse a mano.
+- **Mitigación mientras tanto:** `UPDATE` documentados en `specs/11-api-contracts.md` §9.4 y al pie de `specs/17-store-checkout-coherente.sql`.
+- **Fase:** propuesta para T4 (POS) o fase propia; sin aprobar.
 
 ## 6. Riesgos aceptados
 
@@ -247,7 +256,7 @@
 |---|---|---|---|
 | RA-01 | Lectura pública de `pos_clientes` (nombres, correos, celulares) con la llave pública. Riesgo bajo la Ley 1581 de 2012 (Habeas Data). | Aceptado por el negocio (2026-10-16, ratificado 2026-10-28). Desde T2 la tienda no agrega datos de compradores a esa tabla (D16). | Revisar cuando la tienda reciba pedidos reales. |
 | RA-02 | La portada muestra "4.8 · 152 reseñas verificadas" fijas en `index.html`, que no corresponden a reseñas reales. | Se mantienen por decisión del negocio (2026-10-28). | **Recomendación técnica:** retirarlas o reemplazarlas por reseñas reales. Afirmaciones no veraces en publicidad pueden considerarse publicidad engañosa (Ley 1480 de 2011, Estatuto del Consumidor) y ser sancionadas por la SIC; además, si un cliente lo detecta, afecta la confianza que la tienda busca generar. |
-| RA-03 | Envío gratis desde $80.000 también en zonas remotas y en contraentrega. | Aceptado (D8). | Revisar el margen si entran pedidos a zonas especiales. |
+| RA-03 | Envío gratis desde $80.000 también en zonas remotas y en contraentrega. | Aceptado (D8). **Ratificado 2026-11-08 con las tarifas reales:** en un pedido de $80.000 el envío gratis cuesta entre el 19 % (local, $15.000) y el 52 % (zonas especiales, $42.000) de la venta, más la comisión de recaudo en contraentrega; el negocio decide mantener $80.000 y asumir el costo. | Revisar el margen si entran pedidos a zonas especiales o a contraentrega con envío gratis. |
 | RA-04 | Política `anon crean clientes`: cualquiera con la llave pública puede insertar registros en `pos_clientes` (no editar ni borrar). La tienda ya no la usa desde T2. | Aceptado temporalmente (2026-10-29) para no tocar el POS, que está estable (D20). | Después de T2: probar en QA crear y editar clientes desde el POS sin esa política; si todo funciona, retirarla con un script independiente. |
 | RA-05 | La tienda no valida stock: un pedido puede pedir más unidades de las disponibles (antes ST-06). | Aceptado (2026-10-29, D17). El pedido no mueve inventario y se confirma por WhatsApp; queda el aviso `Stock insuficiente: …` en `notas`. | Revisar si entran pedidos reales con faltantes frecuentes. |
 
@@ -258,8 +267,8 @@
 | **T1 Correcciones rápidas** | ST-01, ST-02, ST-03, ST-25, ST-26, ST-27, ST-28 | Solo frontend | Ninguna | ✅ Hecho 2026-10-28 (`f7ce184`) |
 | **T2 Pedido seguro** | ST-04, ST-05, ST-07, ST-08, ST-29 (ST-06 → RA-05) | SQL + frontend | T1 | ✅ Hecho 2026-11-03 (`b3bc908`) |
 | **T3a WhatsApp y paginación** | ST-12, ST-13 | Solo frontend | T2 | ✅ Hecho 2026-11-08 (`92dc65b`, `272bc1d`) |
-| **T3b Checkout coherente** | ST-09, ST-10, ST-11 | SQL (`17`) + frontend | T3a | En curso (QA) |
-| **T4 Pedidos web en el POS** | ST-15 | POS + SQL menor | T2 (T3 recomendado) | Pendiente |
+| **T3b Checkout coherente** | ST-09, ST-10, ST-11 | SQL (`17`) + frontend | T3a | ✅ Hecho 2026-11-08 (`679251a`) |
+| **T4 Pedidos web en el POS** | ST-15 (+ ST-31 propuesto) | POS + SQL menor | T3b | Pendiente (siguiente) |
 | **T5 Alcance y rendimiento** | ST-16 a ST-21 | Frontend + Vercel | Ninguna | Pendiente |
 | **T6 Deuda técnica** | ST-22, ST-23, ST-24, ST-30, RA-04 | Frontend + SQL + documentación | Puede ir junto con otras fases | Pendiente |
 
@@ -293,7 +302,7 @@
 - **T1 (✅ 2026-10-28):** con dos variantes del mismo producto en el carrito, +, − y eliminar actúan sobre la correcta; el pedido guarda el `producto_detalle_id` de cada variante; una variante agotada no se puede agregar; la grilla muestra "Elegir opción" para productos con variantes y "Desde $X" si los precios difieren; las variantes eliminadas no aparecen; test 20/20.
 - **T2 (✅ 2026-11-03):** el pedido se crea con una sola llamada a `st_crear_pedido`; un precio manipulado en `localStorage` no cambia el precio guardado; si la cantidad supera el stock, el pedido se crea y queda el aviso en `notas` (RA-05); `anon` ya no puede leer ni insertar en `st_pedidos`, `st_pedidos_detalle` ni `st_direcciones` (0 filas en `pg_policies` y en permisos); números `KBT-AAAAMM-NNNNNN` únicos por secuencia; todos los pedidos quedan a nombre de CONSUMIDOR Ecommerce y los datos del comprador en `st_direcciones`; celular obligatorio y correo opcional; POS y WMS sin cambios de comportamiento; tests 59/59 y 119/119.
 - **T3a (✅ 2026-11-08):** "Preguntar por WhatsApp" con producto, opción, SKU, precio y enlace, y logo completo; la paginación no repite productos en una visita; tests 74/74.
-- **T3b:** el envío cambia según departamento/ciudad (zona) y se muestran los días; desde $80.000 es $0; bajo $15.000 no se crea el pedido; carrito, checkout y pedido muestran el mismo total; solo aparecen los 3 medios de pago reales; la confirmación muestra instrucciones y el botón "Confirmar por WhatsApp"; la ficha tiene "Preguntar por WhatsApp" con el producto; la paginación no repite productos.
+- **T3b (✅ 2026-11-08):** el envío cambia según departamento/ciudad (zona) y se muestran los días; desde $80.000 es $0; bajo $15.000 no se crea el pedido; carrito, checkout y pedido muestran el mismo total; solo aparecen los 3 medios de pago reales; la confirmación muestra instrucciones y el botón "Confirmar por WhatsApp"; la ficha tiene "Preguntar por WhatsApp" con el producto; la paginación no repite productos.
 - **T4:** un pedido nuevo aparece en el contador del menú y en el Panel; se puede pasar por todos los estados registrando pago y guía; se puede asignar un cliente real; "Crear venta en POS" abre la venta con los productos; el pedido web no mueve inventario.
 - **T5:** al compartir un enlace se ve imagen, nombre y precio; la búsqueda encuentra por SKU y sin tildes; mejora la carga en celular.
 - **T6:** sin `innerHTML` con datos sin escapar; `01-schema.sql` (o su script complementario) coincide con `pg_policies` de producción; decisión final sobre RA-04.
@@ -304,6 +313,7 @@
 |---|---|---|
 | OP-01 | Borrar los 5 pedidos de prueba de producción (KBT-202610-8977, -0409, -9276, -1848, -7621) y su detalle. También se borró `KBT-202610-8889`, creado por la prueba manual de T1 contra producción (ST-29). | Hecho 2026-10-28 |
 | OP-02 | Borrar los pedidos de prueba de la prueba de humo de T2 en producción (`KBT-202611-000001` y `-000002`) y su detalle. El consecutivo sigue desde el siguiente número. | Hecho 2026-11-03 |
+| OP-03 | Borrar de producción los pedidos de la prueba de humo de T3b (2026-11-08) y su detalle, en un solo bloque `begin; ... commit;`. | Por confirmar |
 
 ## 9. Historial
 
@@ -312,4 +322,5 @@
 | v1 | 2026-10-28 | Levantamiento inicial: 24 hallazgos, 3 riesgos aceptados, decisiones D1–D12 y plan T1–T6. |
 | v2 | 2026-10-28 | T1 publicada: ST-01, 02, 03, 25, 26, 27 y 28 hechos; ST-14 cerrado como falso positivo; nuevos ST-25 a ST-28; decisiones D13–D15; rutas corregidas (`js/api/`, `js/compartido/`); pruebas automatizadas en `tests/store/`. |
 | v3 | 2026-11-03 | T2 publicada (`b3bc908`): ST-04, 05, 07, 08 y 29 hechos; ST-06 pasa a RA-05; nuevos RA-04, ST-29 y ST-30; decisiones D16–D20 (cliente CONSUMIDOR Ecommerce, sin cédula, sin validación de stock, precio del POS, medios de pago temporales); formato `KBT-AAAAMM-NNNNNN`; orden de despliegue 15 → frontend → 16; tests 59/59; OP-02. |
-| v4 | 2026-11-08 | T3a publicada (`92dc65b`, `272bc1d`): ST-12 y ST-13 hechos. T3b en QA: ST-09, ST-10 y ST-11 con `specs/17-store-checkout-coherente.sql` (zonas de envío, envío gratis, pedido mínimo, `medio_pago_web`, instrucciones de pago), checkout y carrito, términos y preguntas frecuentes; decisiones D21–D28; tests 111/111. |
+| v4 | 2026-11-08 | T3a publicada (`92dc65b`, `272bc1d`): ST-12 y ST-13 hechos. T3b en QA con `specs/17-store-checkout-coherente.sql`; decisiones D21–D28; tests 111/111. |
+| v5 | 2026-11-08 | T3b publicada (`679251a`): ST-09, ST-10 y ST-11 hechos; tarifas reales en producción; RA-03 ratificado con las tarifas reales; nuevo ST-31 (configuración solo por SQL); OP-03. |

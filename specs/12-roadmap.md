@@ -460,6 +460,20 @@ Integración de pagos y gestión de pedidos.
 
 ---
 
+## Store — Estado real y plan de mejora (actualizado 2026-11-08)
+
+> Las Fases 10 a 12 de arriba describen el plan original. La tienda se publico con catalogo, carrito y checkout como invitado, y desde octubre de 2026 se mejora por el plan **T1 a T6** de `apps/store/specs/hallazgos-tienda.md`. Decisiones que cambian el plan original: sin pasarela integrada (pago manual por transferencia Bre-B, Tu Link de Mercado Pago o contraentrega), sin cuentas de cliente, el pedido web no mueve inventario (la venta se registra en el POS).
+
+| Fase | Contenido | Estado |
+|---|---|---|
+| T1 Correcciones rapidas | Variantes en carrito y pedido, precio por variante, agotados y eliminados | Hecho 2026-10-28 (`f7ce184`) |
+| T2 Pedido seguro | `st_crear_pedido`, cierre de acceso anonimo, numero por secuencia, cliente generico | Hecho 2026-11-03 (`b3bc908`) |
+| T3a WhatsApp y paginacion | "Preguntar por WhatsApp" en la ficha, paginacion estable | Hecho 2026-11-08 (`92dc65b`, `272bc1d`) |
+| T3b Checkout coherente | Envio por zona, envio gratis, pedido minimo, 3 medios de pago, confirmacion con WhatsApp | Hecho 2026-11-08 (`679251a`) |
+| T4 Pedidos web en el POS | Contador, Panel, `pedidos-web.html`, estados, pago, guia, cliente real, "Crear venta en POS" (+ ST-31 pantalla de configuracion de la tienda, propuesta) | Pendiente (siguiente) |
+| T5 Alcance y rendimiento | Busqueda por SKU y sin tildes, SEO/Open Graph, consultas mas livianas, Tailwind compilado, service worker, iconos PNG | Pendiente |
+| T6 Deuda tecnica | Escape de HTML, codigo duplicado, `01-schema.sql` alineado con politicas, ST-30, RA-04 | Pendiente |
+
 ## Academy (Post-Store)
 
 ---
@@ -506,3 +520,4 @@ Módulo de aprendizaje con cursos, lecciones y progreso de estudiantes.
 | Fecha | Versión | Cambio |
 |---|---|---|
 | 2026-05-23 | 1.0 | Versión inicial del roadmap con 9 fases POS + 3 fases Store + Academy reservada. |
+| 2026-11-08 | 1.1 | Seccion "Store — Estado real y plan de mejora" con las fases T1 a T6 de la tienda. |
