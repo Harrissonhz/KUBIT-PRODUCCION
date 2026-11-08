@@ -125,3 +125,51 @@ function avisoCambiosCarrito(r) {
   html += '</ul>';
   Modal({ titulo: 'Actualizamos tu carrito', contenido: html });
 }
+
+// T3b: configuracion publica de la tienda (envio gratis, pedido minimo, WhatsApp).
+// Se pide una vez por carga de pagina; si falla, se usan valores por defecto.
+var CONFIG_TIENDA_DEFECTO = { envio_gratis_desde: 80000, pedido_minimo: 15000, whatsapp: '573054476133' };
+var _configTiendaPromesa = null;
+
+function obtenerConfigTienda() {
+  if (_configTiendaPromesa) return _configTiendaPromesa;
+  _configTiendaPromesa = (async function() {
+    var cfg = Object.assign({}, CONFIG_TIENDA_DEFECTO);
+    try {
+      if (!window.__supabase || !__supabase.rpc) return cfg;
+      var r = await __supabase.rpc('st_config_tienda', {});
+      if (r && typeof r === 'object') {
+        if (r.envio_gratis_desde === null) cfg.envio_gratis_desde = null;
+        else if (Number(r.envio_gratis_desde) > 0) cfg.envio_gratis_desde = Number(r.envio_gratis_desde);
+        if (Number(r.pedido_minimo) >= 0 && r.pedido_minimo !== undefined && r.pedido_minimo !== null) cfg.pedido_minimo = Number(r.pedido_minimo);
+        if (typeof r.whatsapp === 'string' && /^\d{10,15}$/.test(r.whatsapp)) cfg.whatsapp = r.whatsapp;
+      }
+    } catch (e) {
+      console.error('No se pudo leer la configuracion de la tienda:', e);
+    }
+    return cfg;
+  })();
+  return _configTiendaPromesa;
+}
+
+// T3b: barra "te faltan $X para envio gratis" (subtotal de productos, sin envio)
+function htmlBarraEnvioGratis(subtotal, umbral) {
+  if (!(umbral > 0)) return '';
+  if (subtotal >= umbral) {
+    return '<p class="text-xs font-medium text-green-700">¡Tu envío es gratis!</p>';
+  }
+  var pct = Math.max(4, Math.min(100, Math.round(subtotal / umbral * 100)));
+  return '<p class="text-xs text-slate-600 mb-1.5">Te faltan <strong>' + formatearMoneda(umbral - subtotal) +
+      '</strong> para envío gratis</p>' +
+    '<div class="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">' +
+      '<div class="h-full bg-green-500 rounded-full" style="width:' + pct + '%"></div>' +
+    '</div>';
+}
+
+// T3b: texto de dias estimados de entrega
+function textoDiasEntrega(min, max) {
+  min = Number(min); max = Number(max);
+  if (!(max > 0)) return '';
+  if (!(min > 0) || min === max) return 'Llega en ' + max + (max === 1 ? ' día hábil' : ' días hábiles');
+  return 'Llega en ' + min + '–' + max + ' días hábiles';
+}

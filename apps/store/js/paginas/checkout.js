@@ -1,9 +1,27 @@
-// T3 (ST-09) reemplaza este valor por las tarifas por departamento.
-// En T2 es solo informativo: el valor definitivo lo fija la base de datos en st_crear_pedido.
-var COSTO_ENVIO = 9900;
+// T3b (ST-09): el envio se cotiza por zona (st_cotizar_envio) al elegir departamento y ciudad.
+// Es informativo: el valor definitivo (y el envio gratis) lo fija la base de datos en st_crear_pedido.
+var ENVIO_COTIZADO = null;      // { codigo, nombre, valor, dias_min, dias_max } o null
+var CONFIG_CHECKOUT = null;     // { envio_gratis_desde, pedido_minimo, whatsapp } o null
+var _consultaEnvio = 0;
 
 // WhatsApp del negocio (mismo numero del boton flotante de checkout.html)
 var WHATSAPP_NEGOCIO = '573054476133';
+
+// T3b (ST-11): boton "Copiar" de la llave Bre-B en la confirmacion
+document.addEventListener('click', function(e) {
+  var btn = e.target && e.target.closest ? e.target.closest('[data-copiar]') : null;
+  if (!btn) return;
+  var texto = btn.getAttribute('data-copiar') || '';
+  var listo = function() {
+    btn.textContent = '¡Copiada!';
+    setTimeout(function() { btn.textContent = 'Copiar'; }, 2000);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(texto).then(listo, function() { window.prompt('Copia la llave:', texto); });
+  } else {
+    window.prompt('Copia la llave:', texto);
+  }
+});
 
 document.addEventListener('DOMContentLoaded', async function() {
   var items = obtenerCarritoCheckout();
@@ -13,6 +31,18 @@ document.addEventListener('DOMContentLoaded', async function() {
   }
   renderizarResumen(items);
   poblarDepartamentos();
+
+  // T3b: envio gratis y pedido minimo desde st_configuracion
+  if (typeof obtenerConfigTienda === 'function') {
+    CONFIG_CHECKOUT = await obtenerConfigTienda();
+    if (CONFIG_CHECKOUT && CONFIG_CHECKOUT.whatsapp) WHATSAPP_NEGOCIO = CONFIG_CHECKOUT.whatsapp;
+    renderizarResumen(obtenerCarritoCheckout());
+  }
+  var $ciudad = document.getElementById('checkout-ciudad');
+  if ($ciudad) {
+    $ciudad.addEventListener('change', cotizarEnvio);
+    $ciudad.addEventListener('blur', cotizarEnvio);
+  }
 
   document.getElementById('btn-confirmar-pedido').addEventListener('click', function(e) {
     e.preventDefault();
@@ -44,6 +74,8 @@ function poblarDepartamentos() {
   }
   $select.addEventListener('change', function() {
     filtrarCiudades(this.value);
+    ENVIO_COTIZADO = null;          // T3b: cambia el departamento -> hay que volver a cotizar
+    renderizarResumen(obtenerCarritoCheckout());
   });
 }
 
@@ -122,7 +154,68 @@ function renderizarResumen(items) {
   document.getElementById('checkout-items').innerHTML = html;
   document.getElementById('checkout-cantidad').textContent = totalItems;
   document.getElementById('checkout-subtotal').textContent = formatearMoneda(totalSubtotal);
-  document.getElementById('checkout-total').textContent = formatearMoneda(totalSubtotal + COSTO_ENVIO);
+  // T3b (ST-09): envio por zona, gratis desde el umbral (subtotal sin envio)
+  var umbral = CONFIG_CHECKOUT ? CONFIG_CHECKOUT.envio_gratis_desde : null;
+  var gratis = umbral > 0 && totalSubtotal >= umbral;
+  var envio = ENVIO_COTIZADO ? (gratis ? 0 : Number(ENVIO_COTIZADO.valor) || 0) : null;
+  var $envio = document.getElementById('checkout-envio');
+  if ($envio) {
+    $envio.textContent = envio === null ? (gratis ? 'Gratis' : 'Elige tu ciudad') : (envio === 0 ? 'Gratis' : formatearMoneda(envio));
+  }
+  var $dias = document.getElementById('checkout-envio-dias');
+  if ($dias) {
+    $dias.textContent = ENVIO_COTIZADO && typeof textoDiasEntrega === 'function'
+      ? textoDiasEntrega(ENVIO_COTIZADO.dias_min, ENVIO_COTIZADO.dias_max) : '';
+  }
+  var $barra = document.getElementById('checkout-envio-gratis');
+  if ($barra && typeof htmlBarraEnvioGratis === 'function') {
+    $barra.innerHTML = htmlBarraEnvioGratis(totalSubtotal, umbral);
+  }
+  var $min = document.getElementById('checkout-minimo');
+  if ($min) {
+    var falta = faltaParaMinimo(totalSubtotal) > 0;
+    $min.textContent = falta ? textoPedidoMinimo() : '';
+    if (falta) $min.classList.remove('hidden'); else $min.classList.add('hidden');
+  }
+  document.getElementById('checkout-total').textContent =
+    formatearMoneda(totalSubtotal + (envio || 0)) + (envio === null && !gratis ? ' + envío' : '');
+}
+
+function subtotalCarrito(items) {
+  return (items || []).reduce(function(s, it) { return s + (it.precio || 0) * (it.cantidad || 1); }, 0);
+}
+
+// T3b: pedido minimo sobre el subtotal de productos (sin envio)
+function faltaParaMinimo(subtotal) {
+  var minimo = CONFIG_CHECKOUT ? Number(CONFIG_CHECKOUT.pedido_minimo) || 0 : 0;
+  return minimo > 0 && subtotal < minimo ? minimo - subtotal : 0;
+}
+
+function textoPedidoMinimo() {
+  var minimo = CONFIG_CHECKOUT ? Number(CONFIG_CHECKOUT.pedido_minimo) || 0 : 0;
+  return 'El pedido mínimo es ' + formatearMoneda(minimo) + ' (sin contar el envío).';
+}
+
+// T3b (ST-09): cotiza el envio de la zona del destino (solo lectura)
+async function cotizarEnvio() {
+  var depto = document.getElementById('checkout-departamento').value;
+  var ciudad = (document.getElementById('checkout-ciudad').value || '').trim();
+  var n = ++_consultaEnvio;
+  if (!depto || ciudad.length < 2 || !window.__supabase) {
+    ENVIO_COTIZADO = null;
+    renderizarResumen(obtenerCarritoCheckout());
+    return;
+  }
+  try {
+    var r = await __supabase.rpc('st_cotizar_envio', { p_departamento: depto, p_ciudad: ciudad });
+    if (n !== _consultaEnvio) return;   // llego una respuesta vieja
+    ENVIO_COTIZADO = (r && r.valor !== undefined) ? r : null;
+  } catch (e) {
+    console.error('No se pudo cotizar el envio:', e);
+    if (n !== _consultaEnvio) return;
+    ENVIO_COTIZADO = null;
+  }
+  renderizarResumen(obtenerCarritoCheckout());
 }
 
 function leerFormulario() {
@@ -230,6 +323,16 @@ async function confirmarPedido(items) {
     return;
   }
 
+  // T3b: pedido minimo (la base de datos tambien lo valida)
+  if (faltaParaMinimo(subtotalCarrito(items)) > 0) {
+    Modal({
+      titulo: 'Pedido mínimo',
+      contenido: '<p class="text-sm text-slate-600 mb-4">' + textoPedidoMinimo() + ' Agrega más productos a tu carrito.</p>' +
+        '<a href="index.html" class="block w-full text-center px-4 py-2 text-sm font-medium bg-slate-950 text-white rounded-lg hover:bg-slate-800 transition-colors">Seguir comprando</a>'
+    });
+    return;
+  }
+
   // T1 (ST-01): sin variante no se crea nada
   if (lineasSinVariante(items).length > 0) {
     Modal({
@@ -272,19 +375,7 @@ async function confirmarPedido(items) {
 
     Modal({
       titulo: 'Pedido recibido',
-      contenido: '' +
-        '<div class="text-center py-2">' +
-          '<svg class="w-14 h-14 mx-auto text-green-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
-            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>' +
-          '</svg>' +
-          '<p class="text-sm text-slate-600 mb-1">Pedido <strong>#' + escaparHtml(pedido.numero_pedido) + '</strong> recibido</p>' +
-          '<p class="text-sm text-slate-600 mb-1">' + totalItems + ' ' + (totalItems === 1 ? 'producto' : 'productos') +
-            ' · Total <strong>' + formatearMoneda(pedido.total) + '</strong>' +
-            (pedido.costo_envio ? ' (incluye envío de ' + formatearMoneda(pedido.costo_envio) + ')' : '') + '</p>' +
-          '<p class="text-sm text-slate-500 mb-5">Te contactaremos por WhatsApp al <strong>' + escaparHtml(celular) +
-            '</strong> para confirmar tu pedido y el pago.</p>' +
-          '<a href="index.html" class="block w-full text-center px-4 py-2 text-sm font-medium bg-slate-950 text-white rounded-lg hover:bg-slate-800 transition-colors">Volver a la tienda</a>' +
-        '</div>'
+      contenido: htmlConfirmacion(pedido, celular, totalItems)
     });
   } catch (err) {
     console.error('Error al crear pedido:', err);
@@ -303,4 +394,76 @@ async function confirmarPedido(items) {
         '</div>'
     });
   }
+}
+
+// T3b (ST-11): confirmacion con instrucciones de pago y "Confirmar por WhatsApp".
+// Si el pedido tiene stock insuficiente (RA-05), NO se muestran instrucciones de pago.
+function mensajeWhatsAppPedido(pedido) {
+  return 'Hola, acabo de hacer el pedido ' + pedido.numero_pedido +
+    ' por ' + formatearMoneda(pedido.total) + '.';
+}
+
+function htmlInstruccionesPago(pedido) {
+  var caja = 'mt-4 text-left rounded-lg border px-4 py-3 ';
+  if (pedido.stock_insuficiente) {
+    return '<div class="' + caja + 'border-amber-200 bg-amber-50">' +
+      '<p class="text-sm text-amber-800">Algunos productos tienen pocas unidades. ' +
+      '<strong>Te confirmaremos disponibilidad por WhatsApp antes del pago.</strong> Aún no realices ningún pago.</p>' +
+      '</div>';
+  }
+  var total = formatearMoneda(pedido.total);
+  var numero = escaparHtml(pedido.numero_pedido);
+  var pago = pedido.pago || null;
+  if (pedido.medio_pago === 'transferencia' && pago && pago.llave) {
+    return '<div class="' + caja + 'border-slate-200 bg-slate-50">' +
+      '<p class="text-sm font-medium text-slate-900 mb-2">Paga por transferencia Bre-B</p>' +
+      '<p class="text-xs text-slate-500 mb-1">Llave</p>' +
+      '<div class="flex items-center gap-2 mb-2">' +
+        '<code class="flex-1 min-w-0 truncate text-sm font-mono bg-white border border-slate-200 rounded px-2 py-1.5">' + escaparHtml(pago.llave) + '</code>' +
+        '<button type="button" data-copiar="' + escaparHtml(pago.llave) + '" class="shrink-0 px-3 py-1.5 text-xs font-medium bg-slate-950 text-white rounded hover:bg-slate-800">Copiar</button>' +
+      '</div>' +
+      (pago.titular ? '<p class="text-xs text-slate-600 mb-1">Al transferir verás el nombre: <strong>' + escaparHtml(pago.titular) + '</strong></p>' : '') +
+      '<p class="text-xs text-slate-600">Valor exacto: <strong>' + total + '</strong> · Referencia: <strong>' + numero + '</strong></p>' +
+      (pago.qr_url ? '<div class="mt-3 text-center"><p class="text-xs text-slate-500 mb-1">¿Estás en un computador? Escanea con la app de tu banco</p>' +
+        '<img src="' + escaparHtml(pago.qr_url) + '" alt="QR Bre-B" class="w-40 h-40 mx-auto object-contain"></div>' : '') +
+      '<p class="text-xs text-slate-500 mt-2">Envíanos el comprobante por WhatsApp.</p>' +
+      '</div>';
+  }
+  if (pedido.medio_pago === 'mercado_pago' && pago && pago.link) {
+    return '<div class="' + caja + 'border-slate-200 bg-slate-50">' +
+      '<p class="text-sm font-medium text-slate-900 mb-1">Paga con tarjeta vía Mercado Pago</p>' +
+      '<p class="text-xs text-slate-600 mb-3">Paga exactamente <strong>' + total + '</strong> y escribe <strong>' + numero + '</strong> en la descripción del pago.</p>' +
+      '<a href="' + escaparHtml(pago.link) + '" target="_blank" rel="noopener" class="block w-full text-center px-4 py-2 text-sm font-medium bg-sky-500 text-white rounded-lg hover:bg-sky-600 transition-colors">Pagar con Mercado Pago</a>' +
+      '</div>';
+  }
+  if (pedido.medio_pago === 'contraentrega') {
+    return '<div class="' + caja + 'border-slate-200 bg-slate-50">' +
+      '<p class="text-sm text-slate-700">Pagas <strong>' + total + '</strong> en efectivo al recibir. Te confirmaremos por WhatsApp antes de despachar.</p>' +
+      '</div>';
+  }
+  return '';
+}
+
+function htmlConfirmacion(pedido, celular, totalItems) {
+  var wa = 'https://wa.me/' + (pedido.whatsapp || WHATSAPP_NEGOCIO) + '?text=' + encodeURIComponent(mensajeWhatsAppPedido(pedido));
+  var envio = pedido.envio_gratis || Number(pedido.costo_envio) === 0
+    ? 'envío gratis'
+    : 'incluye envío de ' + formatearMoneda(pedido.costo_envio);
+  var dias = (pedido.dias_max && typeof textoDiasEntrega === 'function')
+    ? '<p class="text-xs text-slate-500 mb-1">' + textoDiasEntrega(pedido.dias_min, pedido.dias_max) + '</p>' : '';
+  return '' +
+    '<div class="text-center py-2">' +
+      '<svg class="w-14 h-14 mx-auto text-green-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+        '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>' +
+      '</svg>' +
+      '<p class="text-sm text-slate-600 mb-1">Pedido <strong>#' + escaparHtml(pedido.numero_pedido) + '</strong> recibido</p>' +
+      '<p class="text-sm text-slate-600 mb-1">' + totalItems + ' ' + (totalItems === 1 ? 'producto' : 'productos') +
+        ' · Total <strong>' + formatearMoneda(pedido.total) + '</strong> (' + envio + ')</p>' +
+      dias +
+      htmlInstruccionesPago(pedido) +
+      '<p class="text-sm text-slate-500 mt-4 mb-4">Te contactaremos por WhatsApp al <strong>' + escaparHtml(celular) +
+        '</strong> para confirmar tu pedido y el pago.</p>' +
+      '<a href="' + wa + '" target="_blank" rel="noopener" class="flex items-center justify-center gap-2 w-full px-4 py-2 mb-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">Confirmar por WhatsApp</a>' +
+      '<a href="index.html" class="block w-full text-center px-4 py-2 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">Volver a la tienda</a>' +
+    '</div>';
 }

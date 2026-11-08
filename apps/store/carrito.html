@@ -51,18 +51,20 @@
             </div>
             <div class="flex justify-between text-slate-600">
               <span>Envío</span>
-              <span class="text-slate-400">Por calcular</span>
+              <span class="text-slate-400 text-right" id="resumen-envio">Según destino</span>
             </div>
+            <div id="resumen-envio-gratis"></div>
             <hr class="border-slate-200">
             <div class="flex justify-between text-base font-semibold text-slate-900">
-              <span>Total</span>
+              <span>Total <span class="text-xs font-normal text-slate-400">(sin envío)</span></span>
               <span id="resumen-total">$0</span>
             </div>
+            <p id="resumen-minimo" class="hidden text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2"></p>
           </div>
           <a href="checkout.html" class="mt-6 block w-full text-center px-6 py-3 bg-slate-950 text-white text-sm font-medium rounded-lg hover:bg-slate-800 transition-colors" id="btn-checkout">
             Ir a checkout
           </a>
-          <p class="mt-3 text-xs text-slate-400 text-center">Envíos a todo Colombia</p>
+          <p class="mt-3 text-xs text-slate-400 text-center" id="resumen-nota-envio">Envíos a todo Colombia · el envío se calcula según tu ciudad</p>
         </div>
       </div>
     </div>

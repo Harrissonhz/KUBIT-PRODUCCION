@@ -2,19 +2,22 @@
 
 Registro corto del estado. El detalle está en `specs/hallazgos-tienda.md`.
 
-## Estado actual (2026-11-03)
+## Estado actual (2026-11-08)
 
 - La tienda está en producción y no ha recibido pedidos reales (todos los pedidos de prueba se borraron: OP-01 y OP-02).
 - Hallazgos ST-01 a ST-30, riesgos aceptados RA-01 a RA-05 y plan T1–T6.
 - **T1 publicada (`f7ce184`):** carrito y pedido por variante (SKU) con su propio precio; variantes agotadas y eliminadas no se pueden comprar; "Elegir opción" y "Desde $X".
 - **T2 publicada (`b3bc908`):** los pedidos se crean solo con la función `st_crear_pedido` (una transacción, precio del POS, cliente CONSUMIDOR Ecommerce, número `KBT-AAAAMM-NNNNNN` por secuencia, aviso de stock en `notas` sin rechazar). Celular obligatorio y correo opcional, sin cédula. Carrito y checkout vuelven a leer el precio del POS. Acceso anónimo a `st_pedidos`, `st_pedidos_detalle` y `st_direcciones` cerrado. Caché `outletshop-20261030-01`.
 - Scripts en producción y QA: `specs/15-store-pedido-seguro.sql` y `specs/16-store-cerrar-acceso-anon.sql`.
-- Pruebas automatizadas: `node --test tests/store/*.test.mjs` (59/59) y `npm test` (119/119).
+- **T3a publicada (`92dc65b`, `272bc1d`):** "Preguntar por WhatsApp" en la ficha con producto, opción, SKU, precio y enlace, con el logo completo de WhatsApp; paginación estable por visita. Caché `outletshop-20261108-01`.
+- **T3b en QA:** script `specs/17-store-checkout-coherente.sql` (zonas de envío, envío gratis desde $80.000, pedido mínimo $15.000, `medio_pago_web`, instrucciones de pago) y checkout/carrito/textos legales. Caché `outletshop-20261108-02`. Valores de envío, llave Bre-B y link de Mercado Pago son de prueba.
+- Pruebas automatizadas: `node --test tests/store/*.test.mjs` (111/111 con T3b) y `npm test` (119/119).
 - `KUBIT-Pruebas` sincronizada con producción (`837c110`); solo difieren los 3 archivos de credenciales.
 
 ## Siguiente paso
 
-- **T3 Checkout coherente:** envío por departamento y gratis desde $80.000 (ST-09), medios de pago reales Transferencia / Mercado Pago / Contraentrega (ST-10), confirmación con instrucciones y "Confirmar por WhatsApp" (ST-11), "Preguntar por WhatsApp" en la ficha (ST-12) y paginación estable (ST-13).
+- **T3b:** probar en QA; antes de producción, reemplazar con `UPDATE` las tarifas, la llave Bre-B, el titular y Tu Link de Mercado Pago (al pie del script 17); orden en producción: script 17 → frontend → prueba de humo.
+- Después: T4 (pedidos web en el POS).
 - Pendiente aparte: RA-04 (quitar `anon crean clientes` tras verificar el POS en QA) y ST-30.
 
 ## Avance por fase
@@ -23,7 +26,8 @@ Registro corto del estado. El detalle está en `specs/hallazgos-tienda.md`.
 |---|---|---|---|
 | T1 Correcciones rápidas | Hecho | 2026-10-28 | f7ce184 |
 | T2 Pedido seguro | Hecho | 2026-11-03 | b3bc908 |
-| T3 Checkout coherente | Pendiente | | |
+| T3a WhatsApp y paginación | Hecho | 2026-11-08 | 92dc65b, 272bc1d |
+| T3b Checkout coherente | En curso (QA) | | |
 | T4 Pedidos web en el POS | Pendiente | | |
 | T5 Alcance y rendimiento | Pendiente | | |
 | T6 Deuda técnica | Pendiente | | |
@@ -36,3 +40,5 @@ Registro corto del estado. El detalle está en `specs/hallazgos-tienda.md`.
 - **2026-10-29:** `KUBIT-Pruebas` sincronizada con producción sin credenciales (POS F42, WMS U2, Store T1, documentación, `package-lock.json`). Se quitó el test duplicado `tests/store/store-t1.test.js` (`97a2455`).
 - **2026-10-29:** decisiones de T2: sin cédula; cliente genérico CONSUMIDOR Ecommerce (`CC 222222222222`; se corrigió el número de Daniel Castaño, que estaba repetido); sin validación de stock (RA-05) con aviso en `notas`; precio siempre del POS; medios de pago temporales; `pos_clientes` no se toca (RA-04).
 - **2026-11-03:** T2 probada en QA (scripts 15 y 16, pedidos `KBT-202611-000001` a `-000003`; `-000002` con `Stock insuficiente: AL119 (pedido 20, disponible 1)`; precio manipulado en `localStorage` ignorado; lectura anónima de `st_pedidos` bloqueada; POS y WMS sin errores) y publicada en producción en orden 15 → frontend (`b3bc908`) → 16. Verificación en producción: 0 políticas y 0 permisos `anon` en las tres tablas. `st_envios` y `st_pagos_online` vacías y sin uso (ST-30). OP-02: pedidos de la prueba de humo borrados. Archivos: `specs/15-store-pedido-seguro.sql`, `specs/16-store-cerrar-acceso-anon.sql`, `specs/03-seed-store-grants.sql`, `checkout.html`, `service-worker.js`, `js/paginas/checkout.js`, `js/paginas/carrito.js`, `js/compartido/utils.js`, `tests/store/_entorno.mjs`, `store-t1.test.mjs`, `store-t2.test.mjs`, `ambiente.test.mjs`.
+- **2026-11-08:** T3a probada en `KUBIT-Pruebas` (tests 73/73 y pruebas manuales: mensaje de WhatsApp por variante, botón flotante, páginas sin repetir, orden nuevo por visita) y publicada (`92dc65b`; Pruebas `f492026`). Ajuste: logo completo de WhatsApp en el botón (`272bc1d`; Pruebas `9a7fcc1`), tests 74/74, caché `outletshop-20261108-01`.
+- **2026-11-08:** decisiones de T3b (D23–D28): `medio_pago_web` sin tocar `pos_metodos_pago`; Bre-B con llave alfanumérica y botón Copiar; Mercado Pago con Tu Link de monto libre (link provisional en QA); contraentrega sin recargo; zonas de envío con valores ficticios para QA y días visibles; pedido mínimo $15.000; sin instrucciones de pago si hay stock insuficiente; textos legales corregidos.

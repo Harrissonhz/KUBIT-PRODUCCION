@@ -1,6 +1,15 @@
+// T3b (ST-09): configuracion de envio gratis y pedido minimo (null = aun no cargada)
+var CONFIG_CARRITO = null;
+
 document.addEventListener('DOMContentLoaded', async function() {
   depurarCarritoGuardado();
   renderCarrito();
+
+  // T3b: envio gratis y pedido minimo desde st_configuracion
+  if (typeof obtenerConfigTienda === 'function') {
+    CONFIG_CARRITO = await obtenerConfigTienda();
+    renderCarrito();
+  }
 
   // T2: precios vigentes del POS al abrir el carrito (no toca cantidades ni stock)
   if (typeof refrescarPreciosCarrito === 'function') {
@@ -137,6 +146,29 @@ function actualizarResumen(items) {
   document.getElementById('resumen-items').textContent = 'Subtotal (' + totalItems + ' ' + (totalItems === 1 ? 'item' : 'items') + ')';
   document.getElementById('resumen-subtotal').textContent = formatearMoneda(totalSubtotal);
   document.getElementById('resumen-total').textContent = formatearMoneda(totalSubtotal);
+  pintarAvisosEnvio(totalSubtotal);
+}
+
+// T3b (ST-09): barra de envio gratis y aviso de pedido minimo (sobre el subtotal, sin envio)
+function pintarAvisosEnvio(subtotal) {
+  if (!CONFIG_CARRITO) return;
+  var $barra = document.getElementById('resumen-envio-gratis');
+  if ($barra && typeof htmlBarraEnvioGratis === 'function') {
+    $barra.innerHTML = htmlBarraEnvioGratis(subtotal, CONFIG_CARRITO.envio_gratis_desde);
+  }
+  var $envio = document.getElementById('resumen-envio');
+  if ($envio) {
+    var gratis = CONFIG_CARRITO.envio_gratis_desde > 0 && subtotal >= CONFIG_CARRITO.envio_gratis_desde;
+    $envio.textContent = gratis ? 'Gratis' : 'Según destino';
+  }
+  var $min = document.getElementById('resumen-minimo');
+  if ($min) {
+    var falta = CONFIG_CARRITO.pedido_minimo > 0 && subtotal < CONFIG_CARRITO.pedido_minimo;
+    $min.textContent = falta
+      ? 'El pedido mínimo es ' + formatearMoneda(CONFIG_CARRITO.pedido_minimo) + ' (sin contar el envío).'
+      : '';
+    if (falta) $min.classList.remove('hidden'); else $min.classList.add('hidden');
+  }
 }
 
 document.getElementById('carrito-items').addEventListener('click', function(e) {

@@ -1,6 +1,6 @@
 # hallazgos-tienda.md — Hallazgos y plan de mejora de la Tienda (apps/store)
 
-**Versión:** v3 · **Fecha:** 2026-11-03 · **Responsable:** Harrisson Zapata
+**Versión:** v4 · **Fecha:** 2026-11-08 · **Responsable:** Harrisson Zapata
 **Alcance:** código de `apps/store` vigente en producción (`outletshop`), políticas RLS reales de producción y decisiones de negocio.
 **Base de datos:** una sola base Supabase por ambiente; prefijos `pos_` (POS), `st_` (Tienda) y `wms_` (WMS). QA = `gbjtdjbopwgbknklwldq`, producción = `gxqcybboiskwznxdioun`.
 
@@ -36,6 +36,14 @@
 | D18 | (2026-10-29) El precio del pedido es siempre el del POS (`pos_productos_detalle.precio_venta`). El carrito y el checkout vuelven a leer el precio al abrirse y avisan si cambió. |
 | D19 | (2026-10-29) Medios de pago en T2 (temporal, T3 crea los definitivos): transferencia → Transferencia, contraentrega → Efectivo, tarjeta → Tarjeta. El medio elegido también queda en `notas`. |
 | D20 | (2026-10-29) La inserción anónima en `pos_clientes` no se quita en T2 para no tocar el POS (RA-04). |
+| D21 | (2026-11-08) T3 se divide en **T3a** (ST-12, ST-13; solo frontend) y **T3b** (ST-09, ST-10, ST-11; SQL + checkout). |
+| D22 | (2026-11-08) Orden del catálogo: aleatorio pero **fijo durante la visita** (semilla en `sessionStorage`); en una visita nueva cambia. |
+| D23 | (2026-11-08) El medio de pago de la tienda se guarda en una columna propia `st_pedidos.medio_pago_web` (`transferencia` / `mercado_pago` / `contraentrega`). **`pos_metodos_pago` no se toca** (el POS la lista al vender). Reemplaza D19. |
+| D24 | (2026-11-08) Tres medios en el checkout: **Transferencia Bre-B**, **Tarjeta débito/crédito vía Mercado Pago** y **Contraentrega**. El botón o los datos de pago aparecen **después** de crear el pedido, nunca antes. |
+| D25 | (2026-11-08) Bre-B: llave **alfanumérica** con botón "Copiar", nombre del titular y QR opcional. Mercado Pago: **Tu Link con monto libre** ("Paga exactamente $X" y el número de pedido en la descripción). Los valores viven en `st_configuracion`. |
+| D26 | (2026-11-08) Envío por **zonas** (`st_tarifas_envio`) con mapeo departamento/ciudad (`st_destinos_envio`); regla ciudad > departamento > zona por defecto (`nacional`). Contraentrega usa la misma tarifa, sin recargo (la comisión de recaudo la asume el negocio). El checkout muestra los días estimados de entrega. |
+| D27 | (2026-11-08) **Pedido mínimo $15.000** en productos, sin envío: lo valida `st_crear_pedido` y el checkout lo avisa. Envío gratis desde $80.000 en productos, sin envío. |
+| D28 | (2026-11-08) Si el pedido tiene "Stock insuficiente" (RA-05), la confirmación **no muestra instrucciones de pago**: "Te confirmaremos disponibilidad por WhatsApp antes del pago". |
 
 **Fuera de alcance por ahora:** analítica (GA, Pixel, Vercel Analytics), reputación de Mercado Libre en la tienda, cédula en el checkout, pasarelas con API.
 
@@ -58,11 +66,11 @@
 | ST-06 | No se valida stock en carrito ni checkout | — | — | — | — | Aceptado (RA-05) |
 | ST-07 | Número de pedido aleatorio con riesgo de colisión | P1 | Bajo | S | T2 | Hecho 2026-11-03 |
 | ST-08 | Cliente creado con NIT inventado y reconocido solo por correo | P1 | Medio | M | T2 | Hecho 2026-11-03 |
-| ST-09 | Envío fijo e incoherente entre carrito y checkout | P1 | Alto | M | T3 | Pendiente |
-| ST-10 | Promesas falsas: pago con tarjeta y correo de confirmación | P1 | Alto | S | T3 | Pendiente (correo resuelto en T2) |
-| ST-11 | Sin pantalla de confirmación con instrucciones de pago ni WhatsApp | P1 | Alto | M | T3 | Pendiente |
-| ST-12 | WhatsApp de la ficha abre un chat vacío | P1 | Alto | S | T3 | Pendiente |
-| ST-13 | Paginación con barajado repite y oculta productos | P1 | Medio | S | T3 | Pendiente |
+| ST-09 | Envío fijo e incoherente entre carrito y checkout | P1 | Alto | M | T3b | En curso (QA) |
+| ST-10 | Promesas falsas: pago con tarjeta y correo de confirmación | P1 | Alto | S | T3b | En curso (QA; correo resuelto en T2) |
+| ST-11 | Sin pantalla de confirmación con instrucciones de pago ni WhatsApp | P1 | Alto | M | T3b | En curso (QA) |
+| ST-12 | WhatsApp de la ficha abre un chat vacío | P1 | Alto | S | T3a | Hecho 2026-11-08 |
+| ST-13 | Paginación con barajado repite y oculta productos | P1 | Medio | S | T3a | Hecho 2026-11-08 |
 | ST-14 | Caracteres dañados en textos visibles | — | — | — | — | Cerrado (falso positivo) |
 | ST-15 | El POS no avisa ni permite gestionar pedidos web | P1 | Alto | L | T4 | Pendiente |
 | ST-16 | Búsqueda limitada (sin SKU, sensible a tildes) | P2 | Medio | M | T5 | Pendiente |
@@ -130,31 +138,33 @@
 - **Solución aplicada (D11, D16):** la tienda ya no crea ni actualiza clientes. Todo pedido web queda a nombre de **CONSUMIDOR Ecommerce** (`CC 222222222222`); la función exige que exista exactamente uno (si no, aborta sin crear nada). Los datos reales del comprador quedan en `st_direcciones` (`nombre_destinatario`, `telefono` con 10 dígitos, `email` nueva columna opcional, dirección). Se corrigió un segundo cliente (Daniel Castaño) que tenía el mismo número.
 - **Consecuencia aceptada:** el sistema no reconoce automáticamente a quien compra de nuevo; los pedidos web se agrupan bajo el cliente genérico hasta asignarlos a uno real en el POS (T4).
 
-### ST-09 · Envío fijo e incoherente — P1 · Ventas: Alto
-- **Evidencia:** `carrito.html` muestra "Por calcular" y no lo suma; el checkout y `st_crear_pedido` usan $9.900 fijos (T2 lo dejó así a propósito).
-- **Mitigación:**
-  - Tabla `st_tarifas_envio`: departamento, ciudad (opcional, para excepciones), valor normal, valor contraentrega, días estimados, activo.
-  - Envío gratis desde un monto configurable (inicial $80.000, D8).
-  - El checkout muestra el valor al elegir departamento y ciudad (`colombia.js`); el valor definitivo lo calcula `st_crear_pedido` (reemplazar la constante `c_envio`).
-  - Carrito: "Envío: se calcula según el destino · gratis desde $80.000".
-- **Archivos:** nuevo script SQL, `specs/15-store-pedido-seguro.sql` (o versión nueva de la función), `checkout.html`, `js/paginas/checkout.js`, `carrito.html`, `js/paginas/carrito.js`.
+### ST-09 · Envío fijo e incoherente — P1 · Ventas: Alto · En curso (T3b, QA)
+- **Evidencia (antes):** `carrito.html` mostraba "Por calcular" y no lo sumaba; el checkout y `st_crear_pedido` usaban $9.900 fijos.
+- **Solución (T3b, D26–D27):** `specs/17-store-checkout-coherente.sql`:
+  - `st_tarifas_envio` (5 zonas: `local`, `antioquia`, `nacional_principal`, `nacional`, `especial`; valor y días) y `st_destinos_envio` (departamento y ciudad → zona). Comparación sin tildes ni mayúsculas; ciudad exacta > departamento > zona por defecto. "Barbosa" solo es local en Antioquia.
+  - `st_configuracion`: `envio_gratis_desde` (80000), `pedido_minimo` (15000), `envio_zona_defecto`.
+  - `st_cotizar_envio(departamento, ciudad)` (solo lectura, `anon`): el checkout muestra valor y "Llega en N–M días hábiles" al elegir la ciudad.
+  - `st_crear_pedido` (misma firma) calcula el envío de la zona, gratis desde el umbral (subtotal sin envío) y rechaza pedidos bajo el mínimo (`[ST_MINIMO]`).
+  - Carrito y checkout: barra "Te faltan $X para envío gratis" y aviso de pedido mínimo (`st_config_tienda`).
+- **Valores de QA ficticios:** local $8.000 (1–2 días), Antioquia $12.000 (2–3), ciudades principales $15.000 (3–4), nacional $18.000 (3–6), especiales $35.000 (5–10). Antes de producción se reemplazan por los reales con `UPDATE` (al pie del script 17).
+- **Archivos:** `specs/17-store-checkout-coherente.sql`, `checkout.html`, `js/paginas/checkout.js`, `carrito.html`, `js/paginas/carrito.js`, `js/compartido/utils.js`.
 
-### ST-10 · Promesas falsas en el checkout — P1 · Ventas: Alto
-- **Avance T2:** el mensaje final ya no promete correo: dice "Te contactaremos por WhatsApp al {celular} para confirmar tu pedido y el pago".
-- **Pendiente:** el checkout sigue ofreciendo "Tarjeta débito/crédito" sin pasarela. Mitigación (D4): solo transferencia con llave, link de Mercado Pago y contraentrega; crear "Contraentrega" y "Mercado Pago" en `pos_metodos_pago` y retirar el mapeo temporal de D19. La llave y los datos de pago se muestran solo en la confirmación.
+### ST-10 · Promesas falsas en el checkout — P1 · Ventas: Alto · En curso (T3b, QA)
+- **Avance T2:** el mensaje final ya no promete correo.
+- **Solución (T3b, D23–D24):** solo 3 medios reales: Transferencia Bre-B, Tarjeta débito/crédito vía Mercado Pago y Contraentrega, guardados en `st_pedidos.medio_pago_web` (`pos_metodos_pago` no se toca; el valor `tarjeta` del checkout anterior se acepta como `mercado_pago`). Se corrigieron `terminos-condiciones.html` (compra sin registro, mínimo $15.000 sin envío, envío gratis desde $80.000, medios reales, factura por WhatsApp o a consumidor final) y `preguntas-frecuentes.html` (medios reales, envío gratis $80.000, guía por WhatsApp, días según la ciudad).
 
-### ST-11 · Sin pantalla de confirmación útil — P1 · Ventas: Alto
-- **Mitigación (D10):** pantalla de confirmación con número de pedido, productos, envío, total, instrucciones según el medio de pago y botón "Confirmar por WhatsApp" (`wa.me`) con el texto "Hola, acabo de hacer el pedido KBT-…".
-- **Archivos:** `checkout.html`, `js/paginas/checkout.js`.
+### ST-11 · Sin pantalla de confirmación útil — P1 · Ventas: Alto · En curso (T3b, QA)
+- **Solución (T3b, D24–D25, D28):** la confirmación muestra número, total, envío (o "envío gratis"), días estimados y, según el medio: llave Bre-B con botón "Copiar", titular, valor exacto y referencia (QR opcional); o "Paga exactamente $X" y botón "Pagar con Mercado Pago" (Tu Link, monto libre); o "Pagas $X en efectivo al recibir". Si hay stock insuficiente no muestra instrucciones de pago. Botón "Confirmar por WhatsApp" con "Hola, acabo de hacer el pedido KBT-… por $X.". La llave y el link solo los devuelve `st_crear_pedido` (D4).
+- **Archivos:** `checkout.html`, `js/paginas/checkout.js`, `specs/17-store-checkout-coherente.sql`.
 
-### ST-12 · WhatsApp de la ficha sin contexto — P1 · Ventas: Alto
-- **Evidencia:** `producto.html`: el botón flotante abre un chat vacío.
-- **Mitigación:** botón "Preguntar por WhatsApp" en la ficha con producto, variante, SKU y enlace. Es una consulta: no crea pedido.
-- **Archivos:** `producto.html`, `js/paginas/producto.js`.
+### ST-12 · WhatsApp de la ficha sin contexto — P1 · Ventas: Alto · ✅ Hecho (T3a)
+- **Evidencia:** `producto.html`: el botón flotante abría un chat vacío.
+- **Solución aplicada:** botón "Preguntar por WhatsApp" en la ficha (logo completo de WhatsApp, verde oficial) y el botón flotante con el mensaje: producto, opción, SKU, precio y enlace; se actualiza al cambiar de variante. Es una consulta: no crea pedido.
+- **Archivos:** `producto.html`, `js/paginas/producto.js`, `tests/store/store-t3a.test.mjs`. Commits `92dc65b` y `272bc1d`.
 
-### ST-13 · Paginación con barajado — P1 · Ventas: Medio
-- **Evidencia:** `js/api/productos.js` baraja todo el catálogo en cada carga y luego corta por página.
-- **Mitigación:** orden estable (por ejemplo, destacados y luego recientes) o barajado con semilla fija por sesión.
+### ST-13 · Paginación con barajado — P1 · Ventas: Medio · ✅ Hecho (T3a)
+- **Evidencia:** `js/api/productos.js` barajaba todo el catálogo en cada carga y luego cortaba por página.
+- **Solución aplicada (D22):** `obtenerPaginados` ordena por `id` y baraja con una semilla guardada en `sessionStorage`: en una visita las páginas no repiten ni ocultan productos; en otra visita el orden cambia. Destacados, relacionados y búsqueda sin cambios.
 
 ### ST-14 · Caracteres dañados — Cerrado (falso positivo, 2026-10-28)
 - Las tildes se ven bien en producción ("Presentación", "Cojín", "Navideña"). El daño venía del visor de OneDrive usado en el levantamiento, no de los archivos.
@@ -183,7 +193,7 @@
 - **Mitigación:** CSS de Tailwind compilado; cargar Instagram solo al hacer scroll o reemplazarlo por imágenes con enlace.
 
 ### ST-20 · Service worker con versiones viejas — P2 · Ventas: Bajo
-- **Evidencia:** `service-worker.js` sirve primero la caché y oculta errores de instalación. Versión actual: `outletshop-20261030-01` (T2).
+- **Evidencia:** `service-worker.js` sirve primero la caché y oculta errores de instalación. Versión actual: `outletshop-20261108-02` (T3b) (T2).
 - **Mitigación:** mismo patrón del POS y WMS (versión por deploy, aviso de recarga); red primero para HTML.
 
 ### ST-21 · Ícono del manifiesto en SVG — P2 · Ventas: Bajo
@@ -247,7 +257,8 @@
 |---|---|---|---|---|
 | **T1 Correcciones rápidas** | ST-01, ST-02, ST-03, ST-25, ST-26, ST-27, ST-28 | Solo frontend | Ninguna | ✅ Hecho 2026-10-28 (`f7ce184`) |
 | **T2 Pedido seguro** | ST-04, ST-05, ST-07, ST-08, ST-29 (ST-06 → RA-05) | SQL + frontend | T1 | ✅ Hecho 2026-11-03 (`b3bc908`) |
-| **T3 Checkout coherente** | ST-09, ST-10, ST-11, ST-12, ST-13 | SQL (tarifas) + frontend | T2 | Pendiente (siguiente) |
+| **T3a WhatsApp y paginación** | ST-12, ST-13 | Solo frontend | T2 | ✅ Hecho 2026-11-08 (`92dc65b`, `272bc1d`) |
+| **T3b Checkout coherente** | ST-09, ST-10, ST-11 | SQL (`17`) + frontend | T3a | En curso (QA) |
 | **T4 Pedidos web en el POS** | ST-15 | POS + SQL menor | T2 (T3 recomendado) | Pendiente |
 | **T5 Alcance y rendimiento** | ST-16 a ST-21 | Frontend + Vercel | Ninguna | Pendiente |
 | **T6 Deuda técnica** | ST-22, ST-23, ST-24, ST-30, RA-04 | Frontend + SQL + documentación | Puede ir junto con otras fases | Pendiente |
@@ -272,14 +283,17 @@
 - `tests/store/store-t1.test.mjs`: 20 casos de T1 (en T2, los de checkout verifican la llamada a `st_crear_pedido`).
 - `tests/store/store-t2.test.mjs`: 35 casos de T2 (una sola llamada, sin precios del navegador, celular y correo, errores, precios vigentes, `checkout.html`, caché y reglas de los scripts 15, 16 y 03).
 - `tests/store/ambiente.test.mjs`: 4 casos de ST-29.
-- Ejecutar desde la raíz: `node --test tests/store/*.test.mjs` (59/59) y `npm test` (Vitest, 119/119).
+- `tests/store/store-t3a.test.mjs`: 15 casos de T3a (mensaje y logo de WhatsApp, paginación por visita).
+- `tests/store/store-t3b.test.mjs`: 37 casos de T3b (configuración, envío por zona y gratis, días, pedido mínimo, 3 medios de pago, confirmación, stock insuficiente, carrito, textos legales, caché y reglas del script 17).
+- Ejecutar desde la raíz: `node --test tests/store/*.test.mjs` (111/111) y `npm test` (Vitest, 119/119).
 - Cada fase agrega su propio archivo de test y los anteriores deben seguir pasando.
 
 ### Criterios de aceptación por fase
 
 - **T1 (✅ 2026-10-28):** con dos variantes del mismo producto en el carrito, +, − y eliminar actúan sobre la correcta; el pedido guarda el `producto_detalle_id` de cada variante; una variante agotada no se puede agregar; la grilla muestra "Elegir opción" para productos con variantes y "Desde $X" si los precios difieren; las variantes eliminadas no aparecen; test 20/20.
 - **T2 (✅ 2026-11-03):** el pedido se crea con una sola llamada a `st_crear_pedido`; un precio manipulado en `localStorage` no cambia el precio guardado; si la cantidad supera el stock, el pedido se crea y queda el aviso en `notas` (RA-05); `anon` ya no puede leer ni insertar en `st_pedidos`, `st_pedidos_detalle` ni `st_direcciones` (0 filas en `pg_policies` y en permisos); números `KBT-AAAAMM-NNNNNN` únicos por secuencia; todos los pedidos quedan a nombre de CONSUMIDOR Ecommerce y los datos del comprador en `st_direcciones`; celular obligatorio y correo opcional; POS y WMS sin cambios de comportamiento; tests 59/59 y 119/119.
-- **T3:** el envío cambia según departamento/ciudad y medio de pago; desde $80.000 es $0; carrito, checkout y pedido muestran el mismo total; solo aparecen los 3 medios de pago reales; la confirmación muestra instrucciones y el botón "Confirmar por WhatsApp"; la ficha tiene "Preguntar por WhatsApp" con el producto; la paginación no repite productos.
+- **T3a (✅ 2026-11-08):** "Preguntar por WhatsApp" con producto, opción, SKU, precio y enlace, y logo completo; la paginación no repite productos en una visita; tests 74/74.
+- **T3b:** el envío cambia según departamento/ciudad (zona) y se muestran los días; desde $80.000 es $0; bajo $15.000 no se crea el pedido; carrito, checkout y pedido muestran el mismo total; solo aparecen los 3 medios de pago reales; la confirmación muestra instrucciones y el botón "Confirmar por WhatsApp"; la ficha tiene "Preguntar por WhatsApp" con el producto; la paginación no repite productos.
 - **T4:** un pedido nuevo aparece en el contador del menú y en el Panel; se puede pasar por todos los estados registrando pago y guía; se puede asignar un cliente real; "Crear venta en POS" abre la venta con los productos; el pedido web no mueve inventario.
 - **T5:** al compartir un enlace se ve imagen, nombre y precio; la búsqueda encuentra por SKU y sin tildes; mejora la carga en celular.
 - **T6:** sin `innerHTML` con datos sin escapar; `01-schema.sql` (o su script complementario) coincide con `pg_policies` de producción; decisión final sobre RA-04.
@@ -298,3 +312,4 @@
 | v1 | 2026-10-28 | Levantamiento inicial: 24 hallazgos, 3 riesgos aceptados, decisiones D1–D12 y plan T1–T6. |
 | v2 | 2026-10-28 | T1 publicada: ST-01, 02, 03, 25, 26, 27 y 28 hechos; ST-14 cerrado como falso positivo; nuevos ST-25 a ST-28; decisiones D13–D15; rutas corregidas (`js/api/`, `js/compartido/`); pruebas automatizadas en `tests/store/`. |
 | v3 | 2026-11-03 | T2 publicada (`b3bc908`): ST-04, 05, 07, 08 y 29 hechos; ST-06 pasa a RA-05; nuevos RA-04, ST-29 y ST-30; decisiones D16–D20 (cliente CONSUMIDOR Ecommerce, sin cédula, sin validación de stock, precio del POS, medios de pago temporales); formato `KBT-AAAAMM-NNNNNN`; orden de despliegue 15 → frontend → 16; tests 59/59; OP-02. |
+| v4 | 2026-11-08 | T3a publicada (`92dc65b`, `272bc1d`): ST-12 y ST-13 hechos. T3b en QA: ST-09, ST-10 y ST-11 con `specs/17-store-checkout-coherente.sql` (zonas de envío, envío gratis, pedido mínimo, `medio_pago_web`, instrucciones de pago), checkout y carrito, términos y preguntas frecuentes; decisiones D21–D28; tests 111/111. |
