@@ -179,3 +179,12 @@ test('Cache: el service worker subio de version para T3a', () => {
   assert.ok(m);
   assert.ok(m[1] + m[2] > '2026103001', 'debe ser posterior a T2 (outletshop-20261030-01): ' + m[0]);
 });
+
+test('ST-12: el boton de la ficha usa el logo completo de WhatsApp (globo y telefono, verde oficial)', () => {
+  const html = leer('producto.html');
+  const m = html.match(/<a id="btn-whatsapp-producto"[\s\S]*?<\/a>/);
+  assert.ok(m, 'no se encontro el boton');
+  assert.match(m[0], /m-5\.421 7\.403/, 'falta el globo del logo');
+  assert.match(m[0], /M17\.472 14\.382/, 'falta el telefono del logo');
+  assert.match(m[0], /fill="#25D366"/i);
+});
