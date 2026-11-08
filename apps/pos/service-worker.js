@@ -1,4 +1,4 @@
-var CACHE = 'kubit-pos-20261016-13'; // Bump: YYYYMMDD-NN (incrementar NN por cada deploy del mismo dia)
+var CACHE = 'kubit-pos-20261108-01'; // Bump: YYYYMMDD-NN (incrementar NN por cada deploy del mismo dia)
 var ES_LOCAL = self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1';
 
 var ASSETS = [
@@ -27,6 +27,9 @@ var ASSETS = [
   'js/supabase.js',
   'js/compartido/database.js',
   'js/compartido/auth.js',
+  'pedidos-web.html',
+  'js/paginas/pedidos-web.js',
+  'js/compartido/pedidos-web-aviso.js',
   'js/paginas/ventas.js',
   'js/paginas/caja.js',
   'js/paginas/productos.js',

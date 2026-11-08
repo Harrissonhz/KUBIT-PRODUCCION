@@ -1571,7 +1571,27 @@ window.DB = (function () {
     linkTienda.parentNode.insertBefore(a, linkTienda.nextSibling);
     return a;
   }
+  // T4 (pedidos web): carga una sola vez js/compartido/pedidos-web-aviso.js, que agrega
+  // "Pedidos web (N)" al menu, el aviso emergente y la tarjeta del Panel.
+  // El archivo es independiente y solo lee datos: si falla o no carga, el POS sigue igual.
+  // La ruta se toma del <script> de database.js (sirve tambien en subcarpetas).
+  function cargarAvisoPedidosWeb() {
+    try {
+      if (window.__kubitAvisoPedidosWeb) return;
+      window.__kubitAvisoPedidosWeb = true;
+      var actual = document.querySelector('script[src*="compartido/database.js"]');
+      if (!actual) return;
+      var s = document.createElement('script');
+      s.src = actual.getAttribute('src').replace(/database\.js(\?.*)?$/, 'pedidos-web-aviso.js');
+      s.charset = 'UTF-8';
+      s.async = true;
+      s.onerror = function () { /* sin aviso; el POS sigue igual */ };
+      (document.body || document.head || document.documentElement).appendChild(s);
+    } catch (e) { /* sin aviso; el POS sigue igual */ }
+  }
+
   function cargarLinkTienda() {
+    cargarAvisoPedidosWeb();   // T4
     var link = document.getElementById('link-tienda-virtual');
     if (!link) return;
     configuracionEmpresa.obtener().then(function (res) {
@@ -1602,6 +1622,71 @@ window.DB = (function () {
       }
     }).catch(function () {});
   }
+
+  /* ════════════════════════════════════════════════════════════
+     T4: PEDIDOS WEB (funciones de specs/18-pos-pedidos-web.sql)
+     El POS no lee st_pedidos/st_direcciones directo: usa estas funciones,
+     que validan la sesion y devuelven el pedido con los datos del comprador.
+     Errores de la base: "[POS_xxx] mensaje" -> { error: 'mensaje', codigo: 'POS_xxx' }
+     ════════════════════════════════════════════════════════════ */
+  function _errorPedidosWeb(e) {
+    var msg = (e && e.message) ? String(e.message) : String(e || '');
+    if (_esErrorAuth(msg) && window.KubitAuth && window.KubitAuth.manejarErrorAuth) {
+      window.KubitAuth.manejarErrorAuth();
+    }
+    var m = msg.match(/\{[\s\S]*\}\s*$/);
+    if (m) {
+      try { var j = JSON.parse(m[0]); if (j && j.message) msg = String(j.message); } catch (x) { /* texto tal cual */ }
+    }
+    var p = msg.match(/\[(POS_[A-Z_]+)\]\s*([\s\S]*)$/);
+    if (p) return { codigo: p[1], error: p[2] };
+    return { codigo: null, error: 'No se pudo completar la operacion con los pedidos web. Intenta de nuevo.' };
+  }
+
+  var pedidosWeb = {
+    contar: async function () {
+      try {
+        var n = await api.rpc('pos_pedidos_web_contar', {});
+        return { data: Number(n) || 0, error: null };
+      } catch (e) {
+        var r = _errorPedidosWeb(e);
+        return { data: 0, error: r.error, codigo: r.codigo };
+      }
+    },
+    listar: async function (vista) {
+      try {
+        var data = await api.rpc('pos_pedidos_web_listar', { p_vista: vista === 'gestionados' ? 'gestionados' : 'pendientes' });
+        return { data: Array.isArray(data) ? data : [], error: null };
+      } catch (e) {
+        var r = _errorPedidosWeb(e);
+        return { data: [], error: r.error, codigo: r.codigo };
+      }
+    },
+    detalle: async function (id) {
+      try {
+        var data = await api.rpc('pos_pedido_web_detalle', { p_pedido_id: id });
+        return { data: data || null, error: null };
+      } catch (e) {
+        var r = _errorPedidosWeb(e);
+        return { data: null, error: r.error, codigo: r.codigo };
+      }
+    },
+    // resultado: 'venta' (CONFIRMADO) | 'no_concretado' (CANCELADO). numeroVenta y nota opcionales.
+    cerrar: async function (id, resultado, numeroVenta, nota) {
+      try {
+        var data = await api.rpc('pos_pedido_web_cerrar', {
+          p_pedido_id: id,
+          p_resultado: resultado,
+          p_numero_venta: (numeroVenta && String(numeroVenta).trim()) || null,
+          p_nota: (nota && String(nota).trim()) || null
+        });
+        return { data: data || null, error: null };
+      } catch (e) {
+        var r = _errorPedidosWeb(e);
+        return { data: null, error: r.error, codigo: r.codigo };
+      }
+    }
+  };
 
   /* ════════════════════════════════════════════════════════════
       API PUBLICA
@@ -1637,6 +1722,7 @@ window.DB = (function () {
     configuracionEmpresa: configuracionEmpresa,
     roles: roles,
     usuarios: usuarios,
+    pedidosWeb: pedidosWeb,   // T4
     cargarLinkTienda: cargarLinkTienda
   };
 })();
