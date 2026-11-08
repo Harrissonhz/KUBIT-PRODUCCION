@@ -33,6 +33,48 @@ function _shuffleArray(arr) {
   return a;
 }
 
+// T3a (ST-13): orden aleatorio pero FIJO durante la visita. La semilla vive en
+// sessionStorage: todas las paginas de la visita usan el mismo orden (no se repiten
+// ni se ocultan productos); en una visita nueva el orden cambia.
+function _semillaSesion() {
+  var CLAVE = 'kubit_orden_semilla';
+  try {
+    var s = parseInt(sessionStorage.getItem(CLAVE), 10);
+    if (!(s > 0)) {
+      s = Math.floor(Math.random() * 2147483646) + 1;
+      sessionStorage.setItem(CLAVE, String(s));
+    }
+    return s;
+  } catch (e) {
+    if (!window.__kubitSemilla) window.__kubitSemilla = Math.floor(Math.random() * 2147483646) + 1;
+    return window.__kubitSemilla;
+  }
+}
+
+function _barajarConSemilla(arr, semilla) {
+  var a = arr.slice();
+  var t = semilla >>> 0;
+  function aleatorio() {   // mulberry32
+    t = (t + 0x6D2B79F5) >>> 0;
+    var r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  }
+  for (var i = a.length - 1; i > 0; i--) {
+    var j = Math.floor(aleatorio() * (i + 1));
+    var tmp = a[i]; a[i] = a[j]; a[j] = tmp;
+  }
+  return a;
+}
+
+function _ordenSesion(productos) {
+  // Se parte siempre del mismo orden (por id) antes de barajar con la semilla
+  var base = productos.slice().sort(function(a, b) {
+    return String(a.id) < String(b.id) ? -1 : (String(a.id) > String(b.id) ? 1 : 0);
+  });
+  return _barajarConSemilla(base, _semillaSesion());
+}
+
 function _extraerDescripcionCorta(texto) {
   if (!texto) return '';
   var punto = texto.indexOf('.');
@@ -223,7 +265,7 @@ window.StoreAPI.productos = {
     var esCategoriaCurso = filtros && filtros.categoria === 'cursos-virtuales';
     productos = productos.filter(function(p) { return esCategoriaCurso || p.tipo !== 'Digital'; });
     var total = productos.length;
-    productos = _shuffleArray(productos);
+    productos = _ordenSesion(productos);   // T3a (ST-13)
     var totalPaginas = Math.max(1, Math.ceil(total / porPagina));
     var inicio = (pagina - 1) * porPagina;
     return {

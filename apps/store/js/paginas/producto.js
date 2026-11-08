@@ -5,6 +5,30 @@ function escHtml(t) {
   });
 }
 
+// T3a (ST-12): "Preguntar por WhatsApp" con el producto, la variante, el SKU y el enlace.
+// Es una consulta: no crea pedido (D10).
+var WHATSAPP_TIENDA = '573054476133';
+
+function mensajeWhatsAppProducto(producto, varianteId, url) {
+  var v = null;
+  if (varianteId && producto.variantes) {
+    v = producto.variantes.find(function(x) { return x.id === varianteId; }) || null;
+  }
+  var lineas = ['Hola, me interesa este producto:', producto.nombre];
+  if (v) lineas.push('Opción: ' + v.nombre);
+  var sku = v ? v.codigo_interno : ((producto.variantes || []).length ? '' : producto.codigo_interno);
+  if (sku) lineas.push('SKU: ' + sku);
+  var precio = v ? v.precio : (producto.preciosDistintos ? 0 : producto.precio);
+  if (precio) lineas.push('Precio: ' + formatearMoneda(precio));
+  if (url) lineas.push(url);
+  return lineas.join('\n');
+}
+
+function urlWhatsAppProducto(producto, varianteId, url) {
+  return 'https://wa.me/' + WHATSAPP_TIENDA + '?text=' +
+    encodeURIComponent(mensajeWhatsAppProducto(producto, varianteId, url));
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   var _lightboxImagenes = [];
   var _lightboxIndice = 0;
@@ -102,6 +126,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('producto-precio').innerHTML = renderPrecio(producto);
     document.getElementById('producto-descripcion').textContent = producto.descripcion_larga;
 
+    // T3a (ST-12): el boton de la ficha y el flotante llevan el producto en el mensaje
+    var urlFicha = window.location.origin + window.location.pathname + '?slug=' + encodeURIComponent(producto.slug);
+    function actualizarWhatsApp(varianteId) {
+      var href = urlWhatsAppProducto(producto, varianteId, urlFicha);
+      var $btnWa = document.getElementById('btn-whatsapp-producto');
+      if ($btnWa) $btnWa.href = href;
+      document.querySelectorAll('.whatsapp-float').forEach(function(a) { a.href = href; });
+    }
+    actualizarWhatsApp(null);
+
     if (producto.variantes && producto.variantes.length > 0) {
       const $variantes = document.getElementById('producto-variantes');
       const $lista = document.getElementById('variantes-lista');
@@ -140,6 +174,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         $btnAgregar.disabled = !v;
         $btnAgregar.textContent = v ? 'Agregar al carrito' : 'Agotado';
+        actualizarWhatsApp(seleccionada);   // T3a (ST-12)
       }
       pintarPrecioVariante();
 
