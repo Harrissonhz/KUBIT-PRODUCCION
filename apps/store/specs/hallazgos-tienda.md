@@ -313,7 +313,7 @@
 |---|---|---|
 | OP-01 | Borrar los 5 pedidos de prueba de producción (KBT-202610-8977, -0409, -9276, -1848, -7621) y su detalle. También se borró `KBT-202610-8889`, creado por la prueba manual de T1 contra producción (ST-29). | Hecho 2026-10-28 |
 | OP-02 | Borrar los pedidos de prueba de la prueba de humo de T2 en producción (`KBT-202611-000001` y `-000002`) y su detalle. El consecutivo sigue desde el siguiente número. | Hecho 2026-11-03 |
-| OP-03 | Borrar de producción los pedidos de la prueba de humo de T3b (2026-11-08) y su detalle, en un solo bloque `begin; ... commit;`. | Por confirmar |
+| OP-03 | Borrar de producción los pedidos de la prueba de humo de T3b (2026-11-08) y su detalle, en un solo bloque `begin; ... commit;`. | Hecho 2026-11-08 |
 
 ## 9. Historial
 

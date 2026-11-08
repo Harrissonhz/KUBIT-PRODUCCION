@@ -19,7 +19,7 @@ Registro corto del estado. El detalle está en `specs/hallazgos-tienda.md`.
 ## Siguiente paso
 
 - **T4 Pedidos web en el POS** (ST-15), posiblemente con ST-31 (pantalla para editar la configuración de la tienda).
-- Confirmar OP-03 (pedidos de la prueba de humo de T3b borrados de producción).
+- OP-03 hecha (2026-11-08): pedidos de la prueba de humo de T3b borrados de producción.
 - Pendiente aparte: RA-04 (quitar `anon crean clientes` tras verificar el POS en QA) y ST-30.
 - Revisar `.claude/skills/kubit-store/SKILL.md` y `.opencode/skills/kubit-store/SKILL.md`.
 
