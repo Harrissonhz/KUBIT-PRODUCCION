@@ -100,8 +100,8 @@
 │       ├── politica-privacidad.html
 │       ├── preguntas-frecuentes.html
 │       ├── factura-print.html
-│       ├── service-worker.js     ← Store SW (outletshop-YYYYMMDD-NN)
-│       ├── manifest.json
+│       ├── service-worker.js     ← Store SW (outletshop-YYYYMMDD-NN); red primero desde T5a
+│       ├── manifest.json         ← PWA: iconos PNG desde T5a
 │       ├── css/
 │       │   └── estilo.css
 │       ├── js/
@@ -123,6 +123,10 @@
 │       └── img/
 │           ├── icon.svg
 │           ├── icon2.svg
+│           ├── icon-192.png          ← T5a
+│           ├── icon-512.png          ← T5a
+│           ├── icon-maskable-512.png ← T5a (logo dentro del circulo seguro)
+│           ├── apple-touch-icon.png  ← T5a (180x180, iPhone)
 │           └── EquipoOutletShop.jpg
 │
 ├── tests/                         ← Suite de tests (vitest + jsdom)
@@ -145,6 +149,7 @@
 │       ├── store-t2.test.mjs      ← T2: st_crear_pedido, celular, precios vigentes, scripts 15/16/03
 │       ├── store-t3a.test.mjs     ← T3a: WhatsApp en la ficha, paginacion por visita
 │       ├── store-t3b.test.mjs     ← T3b: envio por zona, minimo, medios de pago, confirmacion, script 17
+│       ├── store-t5a.test.mjs     ← T5a: busqueda por SKU, buscador, service worker, manifiesto e iconos (35 casos)
 │       └── ambiente.test.mjs      ← ST-29: la tienda apunta al mismo proyecto que POS/WMS y usa llave anon
 │
 ├── .opencode/                     ← Skills para OpenCode CLI
@@ -205,7 +210,7 @@
 ### 2.6 Testing
 - vitest + jsdom para tests unitarios y de integración
 - POS: 119 tests en 5 suites de Vitest (`npm test`, solo `tests/**/*.test.js`)
-- Tienda: 111 casos en `tests/store/*.test.mjs` con `node --test` (sin dependencias, `node:test` + `node:vm`; no tocan la base; los scripts SQL se validan como texto)
+- Tienda: 146 casos en `tests/store/*.test.mjs` con `node --test` (sin dependencias, `node:test` + `node:vm`; no tocan la base; los scripts SQL se validan como texto)
 - POS pedidos web (T4): 29 casos en `tests/pos/*.test.mjs` con `node --test` (mismo estilo que `tests/store`)
 - Zona horaria: America/Bogota (UTC-5) via `ALTER DATABASE SET timezone`
 - Mocks de `window.__supabase`, `window.KubitAuth`, `localStorage` en `tests/setup.js`

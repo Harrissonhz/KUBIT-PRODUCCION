@@ -2,7 +2,7 @@
 
 Este archivo es la **memoria oficial del proyecto** para cualquier IA que trabaje en el ecosistema Kubit. Contiene las reglas, el stack, las decisiones ya tomadas y el estado actual del desarrollo. Leerlo completo antes de cualquier intervención.
 
-**Ultima actualizacion:** 2026-11-08 — se documento la fase **T4 (pedidos web en el POS, ya en produccion)**: script SQL 18, funciones `pos_pedido*_web_*`, pagina `pedidos-web.html`, aviso al entrar, tests `tests/pos/` (secciones 3.1, 3.2, 5.2, 7.1, 7.2, 7.3, 7.4, 10.5, 11 y 13). **Antes de tocar pedidos web en el POS, leer la seccion 5.2.** Antes (mismo dia): se documento el plan de mejora de la Tienda (fases T1, T2, T3a y T3b, ya en produccion), los scripts SQL 15, 16 y 17 y las tablas y funciones nuevas de la tienda (secciones 3.1, 3.2, 5, 7.2, 7.3, 10.4, 11 y 13). **Antes de tocar `apps/store` o cualquier tabla `st_*`, leer la seccion 5.1 y `apps/store/specs/hallazgos-tienda.md`.** Las Fases 42 a 44 del POS se documentaron el 2026-10-21.
+**Ultima actualizacion:** 2026-11-09 — se documento la fase **T5a (busqueda por SKU, buscador, service worker e iconos de la tienda, ya en produccion)**: secciones 3.1, 5.1, 5.3, 7.1, 7.2, 7.3, 7.4, 11 y 13. **Antes de tocar la busqueda, el buscador, el service worker o los iconos de la tienda, leer la seccion 5.3.** Antes (2026-11-08): se documento la fase **T4 (pedidos web en el POS, ya en produccion)**: script SQL 18, funciones `pos_pedido*_web_*`, pagina `pedidos-web.html`, aviso al entrar, tests `tests/pos/` (secciones 3.1, 3.2, 5.2, 7.1, 7.2, 7.3, 7.4, 10.5, 11 y 13). **Antes de tocar pedidos web en el POS, leer la seccion 5.2.** Antes (mismo dia): se documento el plan de mejora de la Tienda (fases T1, T2, T3a y T3b, ya en produccion), los scripts SQL 15, 16 y 17 y las tablas y funciones nuevas de la tienda (secciones 3.1, 3.2, 5, 7.2, 7.3, 10.4, 11 y 13). **Antes de tocar `apps/store` o cualquier tabla `st_*`, leer la seccion 5.1 y `apps/store/specs/hallazgos-tienda.md`.** Las Fases 42 a 44 del POS se documentaron el 2026-10-21.
 
 ---
 
@@ -77,14 +77,14 @@ Este archivo es la **memoria oficial del proyecto** para cualquier IA que trabaj
 ├── apps/
 │   ├── pos/               ← Código del módulo POS
 │   ├── store/             ← Código del módulo Tienda Virtual
-│   │   ├── specs/hallazgos-tienda.md ← Hallazgos, decisiones (D1-D35), riesgos y plan T1-T6 de la tienda
+│   │   ├── specs/hallazgos-tienda.md ← Hallazgos, decisiones (D1-D39), riesgos y plan T1-T6 de la tienda
 │   │   └── memory/progress.md        ← Estado corto y bitacora de la tienda
 │   ├── wms/               ← Modulo WMS (bodega). Ver apps/wms/AGENTS.md
 │   └── academy/           ← Futuro (post-MVP)
 ├── tests/
 │   ├── (vitest)           ← Tests del POS: *.test.js (npm test)
 │   ├── pos/               ← Tests del POS con node --test (T4): *.test.mjs (node --test tests/pos/*.test.mjs)
-│   └── store/             ← Tests de la tienda: *.test.mjs (node --test tests/store/*.test.mjs)
+│   └── store/             ← Tests de la tienda: *.test.mjs (node --test tests/store/*.test.mjs); T1 a T5a, 146 casos
 │
 ├── .opencode/skills/      ← Skills para OpenCode
 │   ├── supabase-postgres-best-practices/
@@ -173,13 +173,13 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 | Tags de producto (chips) | 6 chips toggle en vez de input texto libre. `data-tag` en minúsculas estrictas. Almacenados como `text[]` en `pos_productos.tags`. Los valores deben coincidir EXACTAMENTE con `badgeMap` del Store. |
 | Ciudad checkout Store | `<datalist>` filtrado por departamento desde `colombia.js` para reducir errores de escritura y garantizar consistencia con datos reales. |
 | Canales dinamicos POS | `pos_canales_venta.tipo` agrupa canales en `fisico`, `web_propio` o `marketplace`. Los marketplaces se renderizan dinamicamente desde DB en `<select>`. Costos visibles solo si `tipo === 'marketplace'`. |
-| Service Worker fetch handler | Usar `fetch(e.request, { redirect: 'follow' })` + verificar `!r.redirected` en cache. Necesario porque `npx serve` puede responder con redirecciones que rompen `e.respondWith()` en requests de navegacion. |
+| Service Worker fetch handler | Usar `fetch(e.request, { redirect: 'follow' })` + verificar `!r.redirected` en cache. Necesario porque `npx serve` puede responder con redirecciones que rompen `e.respondWith()` en requests de navegacion. **Store desde T5a:** el service worker de la tienda descarta las copias con redireccion y usa red primero (ver 5.3). |
 | Sidebar label unificado | "Inventario" renombrado a "Stock" en las 16 paginas POS para coincidir con la terminologia del modulo. |
-| SW auto-reload via postMessage | Al activarse el SW (`activate`), envia `{accion:'recargar'}` a todos los clients via `clients.matchAll()` + `postMessage()`. Cada pagina HTML escucha `message` en `navigator.serviceWorker` y ejecuta `location.reload()`. El usuario siempre ve la version mas reciente del SW sin recarga manual. |
+| SW auto-reload via postMessage | Al activarse el SW (`activate`), envia `{accion:'recargar'}` a todos los clients via `clients.matchAll()` + `postMessage()`. Cada pagina HTML escucha `message` en `navigator.serviceWorker` y ejecuta `location.reload()`. El usuario siempre ve la version mas reciente del SW sin recarga manual. Store (T5a): solo si ya habia una cache anterior (no en la primera visita) y nunca en `checkout.html` (ver 5.3). |
 | SW localhost bypass | Si `self.location.hostname === 'localhost'` o `'127.0.0.1'`, el SW hace `return;` sin `e.respondWith()` en fetch, y omite precache en install/activate. Asi `npx serve` funciona sin interferencia del SW. |
 | SW cache versioning YYYYMMDD-NN | El nombre del cache usa formato `kubit-pos-YYYYMMDD-NN` (POS) y `outletshop-YYYYMMDD-NN` (Store). `YYYYMMDD` = fecha del deploy, `NN` = contador por dia (01, 02...). Cada deploy produce un cache nuevo; el SW elimina caches viejos en `activate`. |
-| SW ignoreSearch:true | En `caches.match(e.request, {ignoreSearch:true})` para que `producto.html` (sin query) sirva para requests a `producto.html?slug=...`. Cache-first funciona correctamente en paginas de producto. |
-| SW .catch() en fetch handler | El fetch handler del SW envuelve la promesa en `.catch(() => fetch(e.request))` para evitar el error "A listener indicated an asynchronous response by returning true" cuando el cache falla o hay redirecciones. |
+| SW ignoreSearch:true | En `caches.match(e.request, {ignoreSearch:true})` para que `producto.html` (sin query) sirva para requests a `producto.html?slug=...`. Cache-first funciona correctamente en paginas de producto. **OBSOLETO para la tienda desde T5a:** la clave de cache sin `?consulta` reemplaza a `ignoreSearch` (ver 5.3). |
+| SW .catch() en fetch handler | El fetch handler del SW envuelve la promesa en `.catch(() => fetch(e.request))` para evitar el error "A listener indicated an asynchronous response by returning true" cuando el cache falla o hay redirecciones. **Store desde T5a:** red primero; sin conexion y sin copia el error se propaga (ver 5.3). |
 | npx http-server para local en Windows | `npx serve` en Windows 10 hace redirect 301 de `GET /producto.html?slug=...` → `GET /producto` (pierde query params). Usar `npx http-server apps/store -p 3000` o XAMPP como alternativa local. Este bug no tiene fix desde el codigo del proyecto. |
 | Herramientas module structure | `apps/pos/herramientas/` subdirectorio independiente con hub → sub-page navigation. El hub (`herramientas.html`) muestra card grid, cada card navega a `herramientas/<tool>.html`. Sin modals ni tabs. |
 | Action buttons outside cards | En herramientas y paginas CRUD, los botones de accion (Cancelar, Confirmar, etc.) van en natural flow fuera de los `<details>` cards, usando `flex flex-col sm:flex-row gap-3`. No usan `position: fixed`. Se muestran/ocultan contextualmente via JS (clase `hidden`). |
@@ -230,7 +230,7 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 
 ### 5.1 Reglas de la Tienda (apps/store) — vigentes desde T2/T3b (nov 2026)
 
-Estas reglas **reemplazan** lo que digan entradas antiguas de este archivo (por ejemplo "checkout con 7 operaciones REST", `seed-anon-grants-store.sql` o `metodo_pago_id` en pedidos web). El detalle, la evidencia y las decisiones D1-D35 estan en `apps/store/specs/hallazgos-tienda.md`.
+Estas reglas **reemplazan** lo que digan entradas antiguas de este archivo (por ejemplo "checkout con 7 operaciones REST", `seed-anon-grants-store.sql` o `metodo_pago_id` en pedidos web). El detalle, la evidencia y las decisiones D1-D39 estan en `apps/store/specs/hallazgos-tienda.md`.
 
 | Decision | Valor |
 |---|---|
@@ -247,8 +247,8 @@ Estas reglas **reemplazan** lo que digan entradas antiguas de este archivo (por 
 | Errores de la funcion | Mensajes en espanol con prefijo `[ST_xxx]` (`ST_NOMBRE`, `ST_CELULAR`, `ST_EMAIL`, `ST_DIRECCION`, `ST_UBICACION`, `ST_PAGO`, `ST_ITEMS`, `ST_CONFIG`, `ST_LIMITE`, `ST_MINIMO`). `checkout.js::mensajeErrorPedido()` muestra solo el texto. |
 | Credenciales por ambiente | Nunca se copian entre `KUBIT-Pruebas` (QA) y `KUBIT-PRODUCCION`: `apps/pos/js/config.js`, `apps/wms/js/config.js` y `apps/store/js/api/supabase-client.js`. `tests/store/ambiente.test.mjs` falla si la tienda apunta a otro proyecto que el POS/WMS del mismo repo o si su llave no es `anon` (ST-29). |
 | Despliegue de cambios con SQL | 1) script en QA, 2) frontend en `KUBIT-Pruebas` y pruebas, 3) script en produccion, 4) valores reales por `UPDATE` si aplica, 5) commit con `git add` por archivo (nunca `git add .`), 6) prueba de humo, 7) borrar pedidos de prueba en un solo bloque `begin; ... commit;`. Un script que **cierra** permisos va despues de publicar el frontend (caso del 16). |
-| Tests de la tienda | `node --test tests/store/*.test.mjs` (111 casos) ademas de `npm test` (Vitest, 119). Los `.mjs` usan `node:test` + `node:vm` y no tocan la base; los SQL se validan como texto y su ejecucion real se prueba en QA. Vitest solo toma `tests/**/*.test.js`. |
-| Cache de la tienda | `apps/store/service-worker.js`: `outletshop-YYYYMMDD-NN`, se sube en cada deploy de la tienda. Vigente: `outletshop-20261108-02`. |
+| Tests de la tienda | `node --test tests/store/*.test.mjs` (146 casos) ademas de `npm test` (Vitest, 119). Los `.mjs` usan `node:test` + `node:vm` y no tocan la base; los SQL se validan como texto y su ejecucion real se prueba en QA. Vitest solo toma `tests/**/*.test.js`. |
+| Cache de la tienda | `apps/store/service-worker.js`: `outletshop-YYYYMMDD-NN`, se sube en cada deploy de la tienda. Vigente: `outletshop-20261109-01` (T5a). |
 
 ### 5.2 Pedidos web en el POS (T4) — vigente desde 2026-11-08
 
@@ -268,6 +268,23 @@ Decisiones ya tomadas (no reabrir). Detalle y evidencia: `apps/store/specs/halla
 | Despliegue | Script 18 en QA → frontend en `KUBIT-Pruebas` y pruebas → script 18 en produccion → frontend → prueba de humo (crear un pedido en la tienda, verlo en el POS, cerrarlo "No se concreto" y borrarlo). El script solo agrega: no hay riesgo de orden. `apps/pos/service-worker.js` sube la cache (`kubit-pos-20261108-01`) y precachea los 3 archivos nuevos. |
 | Tests | `node --test tests/pos/*.test.mjs` (29 casos): `.mjs`, `node:test` + `node:vm`, no tocan la base; el SQL 18 se valida como texto y su ejecucion real se prueba en QA. |
 | Menu lateral | `<nav id="sidebar">` sigue con 3 hijos directos: el enlace "Pedidos web" se inserta dentro de la lista (segundo hijo), debajo de Dashboard. |
+
+### 5.3 Busqueda, buscador, service worker e iconos de la tienda (T5a) — vigente desde 2026-11-09
+
+Decisiones ya tomadas (no reabrir). Detalle y evidencia: `apps/store/specs/hallazgos-tienda.md` (ST-16, ST-20, ST-21, ST-32 y D36-D39). Sin SQL.
+
+| Decision | Valor |
+|---|---|
+| Busqueda del catalogo | `apps/store/js/api/productos.js`: `buscar()` y `obtenerPaginados()` usan `_filtrarPorBusqueda()`. Normaliza (minusculas, sin tildes, espacios unicos); **todas** las palabras deben aparecer, en cualquier orden, en el nombre, el SKU de **todas** las variantes, la marca, las etiquetas (menos `destacado`) y la descripcion corta. `AL-119` encuentra `AL119` (la palabra sin separadores se compara solo si tiene 3 o mas caracteres). Se calcula en el navegador sobre el catalogo ya cargado: no hay SQL ni cambios en la base. |
+| Orden de resultados | `_ordenarPorRelevancia()`: 0 SKU exacto, 1 SKU que empieza igual, 2 nombre que empieza igual, 3 nombre que contiene la frase, 4 SKU que contiene la frase, 5 el resto. A igual relevancia se conserva el orden de la visita de T3a (`_ordenSesion`), asi la paginacion no repite ni oculta productos (ST-13). Sin busqueda el orden es exactamente el de T3a. Los datos de busqueda de cada producto se calculan una vez (`WeakMap`). |
+| Buscador de la barra (ST-32) | `navbar-store.js`: Enter (escritorio y movil) lleva a `index.html?q=...` **desde cualquier pagina**; antes iba a un `?q=` relativo y en la ficha abria `producto.html?q=...` sin producto. El campo muestra el texto buscado. La ruta `/buscar?q=` de `04-store-spec.md` §7.1 no existe. |
+| Service worker de la tienda | `apps/store/service-worker.js`: HTML, JS, CSS y manifiesto por **red primero** (copia guardada solo sin conexion); imagenes y demas archivos locales por cache primero; solo GET del mismo sitio (Supabase, WhatsApp, Mercado Pago, fuentes y CDN pasan directo); la clave de cache no lleva `?consulta` (`?q=`, `?slug=`, `?pagina=`) y `/` equivale a `index.html`; se ignoran copias con redireccion; solo se guardan respuestas `ok` del mismo origen. Reemplaza el cache-first y `ignoreSearch:true` de las secciones 5 y 12 **para la tienda**; el POS conserva su service worker. |
+| Precarga | `cache.add` archivo por archivo: si uno falla, los demas igual se guardan (antes todo o nada). La lista incluye `colombia.js`, los 4 PNG y `manifest.json`; `store-t5a.test.mjs` verifica que cada archivo de la lista exista en `apps/store` y que no haya repetidos. |
+| Recarga al actualizar | En `activate` envia `{accion:'recargar'}` a las paginas abiertas solo si ya habia una cache anterior (no en la primera visita) y **nunca a `checkout.html`**. Las paginas de la tienda escuchan el mensaje (regla de la seccion 5). En `localhost` y `127.0.0.1` el SW no precarga ni intercepta: **probar el service worker solo en el Vercel de calidad**, no con `http-server`. |
+| Iconos (ST-21) | `manifest.json`: `img/icon-192.png` y `img/icon-512.png` (`any`), `img/icon-maskable-512.png` (`maskable`, con todo el logo dentro del circulo seguro del 40 %) e `img/icon.svg` (`any`); ya no se usa `any maskable` en un mismo icono. `img/apple-touch-icon.png` (180x180) en las 8 paginas, porque iPhone no lee SVG. Los PNG se generaron desde `icon.svg` (render a alta resolucion, logo recortado y centrado sobre fondo negro). El favicon sigue siendo `icon.svg` (152 KB, ST-33). |
+| Cache | `outletshop-20261109-01`. Se sube en cada deploy de la tienda. |
+| Despliegue | Sin SQL. Se aplico con un script de una sola vez (`aplicar-t5a.mjs`, no se versiona) que edita `productos.js`, `navbar-store.js` y las 8 paginas con reemplazos exactos (si un texto no aparece exactamente una vez, no modifica nada) mas la copia de `service-worker.js`, `manifest.json`, los 4 PNG y el test. Se verifica el service worker en el Vercel de calidad (Manifest, Cache Storage, Offline, busqueda y checkout sin recarga) antes de produccion. |
+| Tests | `tests/store/store-t5a.test.mjs` (35 casos): busqueda, orden y paginacion estable, buscador, service worker (con navegador simulado), manifiesto e iconos. Total de la tienda: 146. |
 
 ---
 
@@ -300,7 +317,7 @@ Decisiones ya tomadas (no reabrir). Detalle y evidencia: `apps/store/specs/halla
 - [x] `ARCHITECTURE.md` — Estructura de directorios
 - [x] `AGENTS.md` — Memoria persistente (este archivo)
 - [x] `CONTEXT.md` — Glosario de dominio del proyecto
-- [x] `apps/store/specs/hallazgos-tienda.md` — Hallazgos, decisiones, riesgos aceptados y plan T1-T6 de la tienda (v6)
+- [x] `apps/store/specs/hallazgos-tienda.md` — Hallazgos, decisiones, riesgos aceptados y plan T1-T6 de la tienda (v7)
 - [x] `15-store-pedido-seguro.sql`, `16-store-cerrar-acceso-anon.sql`, `17-store-checkout-coherente.sql` — Scripts de la tienda (T2 y T3b), ejecutados en QA y produccion
 - [x] `18-pos-pedidos-web.sql` — Pedidos web en el POS (T4): columnas de gestion de `st_pedidos` y funciones `pos_pedido*_web_*`, ejecutado en QA y produccion
 
@@ -314,7 +331,7 @@ Decisiones ya tomadas (no reabrir). Detalle y evidencia: `apps/store/specs/halla
 - [x] `producto.js` — Async detalle producto + relacionados
 - [x] Todas las páginas migradas: `data.js` → `supabase-client.js`
 - [x] `MigracionProductos.sql` — DML generado automáticamente (100 productos, 1158 INSERTs total: 100 pos_productos + 100 detalle + 958 multimedia)
-- [x] `checkout.js` — ~~Guest checkout con 7 operaciones REST secuenciales~~ **(OBSOLETO desde T2, 2026-11-03):** el pedido se crea con una sola llamada a `st_crear_pedido`. Ver §5.1 y el bloque "Modulo Store — Plan de mejora T1 a T4" abajo.
+- [x] `checkout.js` — ~~Guest checkout con 7 operaciones REST secuenciales~~ **(OBSOLETO desde T2, 2026-11-03):** el pedido se crea con una sola llamada a `st_crear_pedido`. Ver §5.1 y el bloque "Modulo Store — Plan de mejora T1 a T5a" abajo.
 - [x] **Favicon SVG**: `<link rel="icon" type="image/svg+xml" href="img/icon.svg">` agregado en las 8 páginas HTML
 - [x] **Navbar fixed**: `navbar-store.js` cambiado de `sticky` a `fixed top-0 left-0 right-0 z-50 w-full` para que el navbar (logo, búsqueda, redes, carrito) permanezca visible al scrollear en todas las páginas. `pt-14` agregado al `<main>` wrapper para compensar altura.
 - [x] **icon2.svg**: Nuevo archivo de icono minimalista (bolsa/tienda) para uso futuro
@@ -460,9 +477,9 @@ Decisiones ya tomadas (no reabrir). Detalle y evidencia: `apps/store/specs/halla
 - [x] Fix: Menú hamburguesa roto en herramientas.html (sidebar.js no existía) y renombrar-archivos.html (no incluía el script)
 - [x] Tests: `npm test` → 99 passed, 0 failures
 
-#### Modulo Store — Plan de mejora T1 a T4 (oct-nov 2026)
+#### Modulo Store — Plan de mejora T1 a T5a (oct-nov 2026)
 
-Detalle completo en `apps/store/specs/hallazgos-tienda.md` (hallazgos ST-01 a ST-31, riesgos RA-01 a RA-05, decisiones D1-D35).
+Detalle completo en `apps/store/specs/hallazgos-tienda.md` (hallazgos ST-01 a ST-33, riesgos RA-01 a RA-05, decisiones D1-D39).
 
 **T1 — Correcciones rapidas (2026-10-28, `f7ce184`, cache `outletshop-20261028-01`)**
 - [x] Carrito y pedido por variante (`detalleId`), precio propio por variante, variantes agotadas y eliminadas no se compran, "Elegir opcion" y "Desde $X" en la grilla (ST-01, 02, 03, 25, 26, 27, 28).
@@ -496,6 +513,15 @@ Detalle completo en `apps/store/specs/hallazgos-tienda.md` (hallazgos ST-01 a ST
 - [x] `tests/pos/pedidos-web.test.mjs` (23) y `tests/pos/pedidos-web-ui.test.mjs` (6): 29 casos.
 - [x] Produccion: script 18 ejecutado y verificado, frontend publicado y prueba de humo hecha; el pedido de prueba se borro (OP-04). QA conserva sus pedidos de prueba (`KBT-202611-000001` a `-000010`: 2 cerrados y 8 pendientes), por eso el aviso de QA sigue apareciendo.
 
+**T5a — Busqueda, buscador, service worker e iconos (2026-11-09, `6d052a9` produccion y `677a26e` Pruebas, cache `outletshop-20261109-01`)**
+- [x] `apps/store/js/api/productos.js`: busqueda sin tildes, por palabras, con SKU de todas las variantes, marca y etiquetas, ordenada por relevancia y con la paginacion de T3a intacta (ST-16).
+- [x] `apps/store/js/compartido/navbar-store.js`: Enter lleva a `index.html?q=...` desde cualquier pagina y el campo muestra lo buscado (ST-32, hallado al revisar el codigo).
+- [x] `apps/store/service-worker.js` reescrito: red primero para HTML/JS/CSS, precarga archivo por archivo, solo GET del mismo sitio, recarga solo al actualizar y nunca en el checkout (ST-20).
+- [x] `apps/store/manifest.json`, 4 PNG (`icon-192`, `icon-512`, `icon-maskable-512`, `apple-touch-icon`) y `apple-touch-icon` de las 8 paginas apuntando al PNG (ST-21).
+- [x] `tests/store/store-t5a.test.mjs` (35 casos). Total de la tienda: 146.
+- [x] Sin SQL. Probada en `KUBIT-Pruebas` (pruebas manuales), publicada en calidad antes de produccion; prueba de humo exitosa en produccion (sin crear pedidos: T5a no toca el checkout).
+- [ ] Hallado y pendiente: `img/icon.svg` pesa 152 KB y se usa como favicon en las 8 paginas (ST-33, T5c).
+
 ### 7.3 Pendiente
 - [ ] `06-academy-spec.md` — Especificación del módulo Academy (post-MVP)
 - [x] Migrar datos Fase 1: ejecutar scripts `01-migrate-usuarios.sql` → `08-migrate-gastos-mensuales-detalle.sql` en orden FK
@@ -515,8 +541,9 @@ Detalle completo en `apps/store/specs/hallazgos-tienda.md` (hallazgos ST-01 a ST
 - [ ] Revision de seguridad en detalle (a tratar aparte).
 - [x] Tienda T4 (ST-15) hecha el 2026-11-08 (ver 7.2 y 5.2). Quedaron fuera de alcance: estados intermedios, registro de pagos y guias y "Crear venta en POS".
 - [ ] Tienda ST-31: pantalla para editar `st_configuracion` y tarifas de envio sin SQL (hoy solo por `UPDATE`). Requiere funciones que validen administrador; las tablas no estan abiertas a `authenticated`.
-- [ ] Tienda T5 (ST-16 a ST-21) y T6 (ST-22, 23, 24, 30 y decision final de RA-04). Ver `apps/store/specs/hallazgos-tienda.md` §7.
-- [x] Skills `kubit-store` y `kubit-pos` (`.claude` y `.opencode`) actualizados hasta T4 (2026-11-08).
+- [x] Tienda T5a (ST-16, ST-20, ST-21 y ST-32) hecha el 2026-11-09 (ver 7.2 y 5.3).
+- [ ] Tienda T5b (ST-17: vista previa al compartir un producto y `sitemap.xml`; requiere configuracion en Vercel) y T5c (ST-18, ST-19 y ST-33: catalogo mas liviano, Tailwind compilado, Instagram diferido y favicon de 152 KB). T6 (ST-22, 23, 24, 30 y decision final de RA-04). Ver `apps/store/specs/hallazgos-tienda.md` §7.
+- [x] Skills `.claude` y `.opencode`: `kubit-store` actualizado hasta T5a (2026-11-09) y `kubit-pos` hasta T4 (2026-11-08).
 - [ ] Produccion: los usuarios `admin` y `admin_497a2c95` de `pos_usuarios` no existen en Supabase Auth (no pueden iniciar sesion ni usar las funciones de pedidos web). Depurarlos o crearlos en Authentication > Users si hacen falta (ver 10.5).
 
 ### 7.5 Completado (Documentacion de Migracion)
@@ -731,7 +758,7 @@ Cada fase indica que cambio, los archivos y la version del cache. Commits entre 
 - [x] Se corrigieron en produccion las filas de `pos_finanzas_mensuales` de ago, sep y oct 2026 para que cuadren con `pos_ventas` (ver §5 y `specs/03-pos-spec.md` §3.6.2). Nov 2025 no se toca (ventas importadas desde CSV).
 
 ### 7.4 Próximo Paso Recomendado
-**Tienda:** T4 (pedidos web en el POS) ya esta en produccion. Siguiente: T5 (alcance y rendimiento) o ST-31 (pantalla de configuracion de la tienda), a decidir.
+**Tienda:** T4 (pedidos web en el POS) y T5a (busqueda, service worker e iconos) ya estan en produccion. Siguiente: T5b (vista previa al compartir y sitemap), T5c (rendimiento y favicon) o ST-31 (pantalla de configuracion de la tienda), a decidir.
 **Despues del deploy:** Integración con MercadoLibre para sincronizar productos y pedidos.
 
 ---
@@ -1185,7 +1212,7 @@ Cada fase indica que cambio, los archivos y la version del cache. Commits entre 
 - **Badge system del Store:** Los tags de producto se renderizan como badges visuales en las cards del catalogo. La funcion `obtenerBadges()` en `card-producto.js` itera `producto.tags[]` y mapea cada tag a un badge con icono y color CSS. Los badges se apilan verticalmente (`flex-col gap-1.5`). La prioridad "Agotado" oculta los demas badges. Los tags `oferta`, `super-oferta` y `remate` se agrupan bajo un unico badge "Oferta". Los tags deben coincidir EXACTAMENTE en lowercase con `badgeMap` en `card-producto.js:5-13`. **Stock check:** `obtenerBadges()` calcula `stockTotal` sumando `variantes[].stock` (multi-variante) o usando `producto.stock` (variante unica). Si stock ≤ 0, badge "Agotado" es prioritario sobre cualquier otro.
 - **Tags lowercase obligatorio en DB:** El `data-tag` en chips POS usa minusculas. Los tags se almacenan exactamente asi en `pos_productos.tags[]`. El Store filtra y mapea comparando con `badgeMap` usando `tags.indexOf('destacado')` — cualquier diferencia de case rompe el badge. Los 3 chips de oferta son: `nuevo`, `destacado`, `oferta`. Ademas hay chips adicionales: `mas_vendido`, `liquidacion`, `imperdible`.
 - **Navbar fixed en Store vs sticky:** Se usa `position: fixed` en vez de `sticky` porque Tailwind CDN no siempre procesa correctamente clases CSS en contenido inyectado via JavaScript (`innerHTML`). `position: fixed` es universalmente soportado y no depende del MutationObserver del CDN. Se compensa con `pt-14` (56px = altura del navbar `h-14`) en el `<main>` de cada página.
-- **Favicon SVG en Store:** Las 8 páginas HTML del Store usan `<link rel="icon" type="image/svg+xml" href="img/icon.svg">`. SVG es soportado como favicon en navegadores modernos (Chrome, Firefox, Edge, Safari 14+). No se generan versiones PNG ni ICO.
+- **Favicon SVG en Store:** Las 8 páginas HTML del Store usan `<link rel="icon" type="image/svg+xml" href="img/icon.svg">`. SVG es soportado como favicon en navegadores modernos (Chrome, Firefox, Edge, Safari 14+). ~~No se generan versiones PNG ni ICO.~~ **(Actualizado en T5a, 2026-11-09)**: el favicon sigue siendo `icon.svg`, pero el manifiesto y el `apple-touch-icon` usan PNG (ver 5.3). El SVG pesa 152 KB (ST-33).
 - **Store Lightbox 100% via JS:** El lightbox modal de galeria de producto se construye completamente via JavaScript (DOM creation, eventos, animaciones). No se modifica `producto.html`. La estructura sigue el mismo patron que `abrirVideoModal()` existente: crear overlay, toolbar, contenido, adjuntar al body, limpiar al cerrar.
 - **Scope de funciones en producto.js:** Todas las funciones de la pagina de producto (`renderizarProducto`, `abrirLightbox`, `abrirVideoModal`, `renderizarRelacionados`) estan declaradas **dentro** del callback `DOMContentLoaded`. Esto es obligatorio porque `renderizarProducto` y las funciones del lightbox comparten variables de clausura (`_lightboxImagenes`, `_lightboxIndice`, `_autoplayTimer`, `_autoplayActivo`, `_tiempoFuera`). Cualquier funcion futura que acceda a estas variables debe estar en el mismo scope.
 - **Crossfade CSS vs slide:** La transicion entre imagenes del lightbox usa crossfade CSS (`.desvanecer` con `opacity 0.3s ease`) en vez de slide/translate. Es mas simple, ligero y evita problemas de layout con imagenes de distintas proporciones. La logica: agregar clase `.desvanecer` → wait 300ms (via `setTimeout`) → cambiar `img.src` → remover clase `.desvanecer`.
@@ -1193,10 +1220,10 @@ Cada fase indica que cambio, los archivos y la version del cache. Commits entre 
 - **Eventos del lightbox con cleanup:** Los eventos de teclado (`keydown`) y touch (`touchstart`/`touchend`) se limpian via `MutationObserver` que detecta cuando el overlay ya no esta en el DOM. Esto evita memory leaks y listeners huerfanos.
 - **cursor-pointer condicional en imagen principal:** No se pone `cursor-pointer` en el HTML estatico de `producto.html`. Se agrega via JS (`classList.add('cursor-pointer')`) solo cuando `_lightboxImagenes.length > 1`, es decir, cuando hay mas de una imagen y el lightbox tiene sentido abrirse al hacer click. Si solo hay 1 imagen, el cursor queda como default (arrow) porque hacer click no hace nada.
 - **Click-outside cierra lightbox:** El handler de clic del overlay cierra el modal cuando se hace clic en cualquier elemento que NO sea la imagen (`.lightbox-imagen`), flechas (`.lightbox-arrow`), dots (`.lightbox-dot`), boton autoplay (`.lightbox-btn`) o boton cerrar (`.lightbox-close`). Es el comportamiento estandar de Fancybox, GLightbox y Photoswipe. El usuario puede cerrar tocando el fondo negro, el padding alrededor de la imagen, el toolbar vacio o el area de dots.
-- **Store SW con ES_LOCAL bypass:** El service worker del Store detecta `self.location.hostname === 'localhost'` o `'127.0.0.1'` y hace `return;` sin `e.respondWith()` en fetch, y omite precache en install/activate. Esto permite que `npx serve` funcione sin interferencia del SW (los 301 redirects los maneja el navegador directamente).
-- **SW auto-reload via postMessage obligatorio:** Al activarse el SW, debe enviar `{accion:'recargar'}` a todos los clients via `clients.matchAll()` + `postMessage()`. Cada pagina HTML debe escuchar `navigator.serviceWorker.addEventListener('message', ...)` y ejecutar `location.reload()`. El usuario siempre ve la version mas reciente sin recarga manual. Esta decision aplica tanto a POS como a Store.
-- **SW ignoreSearch:true para producto.html:** `caches.match(e.request, {ignoreSearch:true})` permite que el cache de `producto.html` (sin query) sirva para requests a `producto.html?slug=...`. Sin esto, el cache-first fallaria en todas las paginas de producto porque la URL del cache no coincide con la URL solicitada (difieren en query string).
-- **SW .catch() obligatorio en fetch handler:** El fetch handler debe envolver la promesa en `.catch(() => fetch(e.request))`. Sin esto, si el cache falla o hay una redireccion, el SW lanza "A listener indicated an asynchronous response by returning true" y la pagina no carga.
+- **Store SW con ES_LOCAL bypass:** El service worker del Store detecta `self.location.hostname === 'localhost'` o `'127.0.0.1'` y hace `return;` sin `e.respondWith()` en fetch, y omite precache en install/activate. Esto permite que `npx serve` funcione sin interferencia del SW (los 301 redirects los maneja el navegador directamente). El resto de la estrategia (cache-first) cambio en T5a: ahora es red primero (ver 5.3).
+- **SW auto-reload via postMessage obligatorio:** Al activarse el SW, debe enviar `{accion:'recargar'}` a todos los clients via `clients.matchAll()` + `postMessage()`. Cada pagina HTML debe escuchar `navigator.serviceWorker.addEventListener('message', ...)` y ejecutar `location.reload()`. El usuario siempre ve la version mas reciente sin recarga manual. Esta decision aplica tanto a POS como a Store. Vigente en la tienda con las condiciones de T5a (solo si habia una cache anterior y nunca en `checkout.html`).
+- **SW ignoreSearch:true para producto.html:** `caches.match(e.request, {ignoreSearch:true})` permite que el cache de `producto.html` (sin query) sirva para requests a `producto.html?slug=...`. Sin esto, el cache-first fallaria en todas las paginas de producto porque la URL del cache no coincide con la URL solicitada (difieren en query string). **(OBSOLETO para la tienda desde T5a, 2026-11-09: la clave de cache sin `?consulta` reemplaza a `ignoreSearch`; ver 5.3)**
+- **SW .catch() obligatorio en fetch handler:** El fetch handler debe envolver la promesa en `.catch(() => fetch(e.request))`. Sin esto, si el cache falla o hay una redireccion, el SW lanza "A listener indicated an asynchronous response by returning true" y la pagina no carga. **(OBSOLETO para la tienda desde T5a, 2026-11-09: red primero con copia de respaldo; ver 5.3)**
 - **SW cache versioning YYYYMMDD-NN:** El nombre del cache usa formato `kubit-pos-YYYYMMDD-NN` (POS) y `outletshop-YYYYMMDD-NN` (Store). `YYYYMMDD` = fecha del deploy, `NN` = contador por dia que se incrementa manualmente en cada deploy del mismo dia (01, 02...). Esto garantiza que cada deploy use un cache nuevo. El SW elimina caches viejos en el evento `activate`.
 - **npx serve no funciona en Windows para el Store:** En Windows 10, `npx serve` hace un redirect 301 de `GET /producto.html?slug=...` → `GET /producto` (pierde query params). Este bug no tiene fix desde el codigo del proyecto. Usar `npx http-server apps/store -p 3000` o XAMPP como alternativa local.
 - **producto.js try/catch obligatorio:** El callback `DOMContentLoaded` en `apps/store/js/paginas/producto.js` debe estar envuelto en `try/catch` porque si el SW sirve una version corrupta o incompleta del JS, la pagina se rompe silenciosamente. El catch muestra "Error al cargar el producto. Por favor, recarga la pagina." en el contenedor `#app`.
@@ -1262,7 +1289,7 @@ Cada fase indica que cambio, los archivos y la version del cache. Commits entre 
 | Navbar Store | `navbar-store.js` (se inyecta en `<div id="navbar">`) |
 | Navbar fixed | `navbar-store.js`: `fixed top-0 left-0 right-0 z-50 w-full` + `pt-14` en `<main>` |
 | Favicon Store | `apps/store/*.html`: `<link rel="icon" type="image/svg+xml" href="img/icon.svg">` |
-| Iconos Store | `apps/store/img/icon.svg` (complejo), `icon2.svg` (minimalista bolsa) |
+| Iconos Store | `apps/store/img/icon.svg` (complejo), `icon2.svg` (minimalista bolsa); PNG desde T5a (ver 5.3) |
 | Store checkout | `checkout.js::confirmarPedido()`, `__supabase.rpc('st_crear_pedido', ...)`, una sola llamada (desde T2; las 7 operaciones REST quedaron obsoletas) |
 | Grants anon Store | `specs/03-seed-store-grants.sql` y `specs/16-store-cerrar-acceso-anon.sql`: `anon` sin acceso a `st_pedidos`, `st_pedidos_detalle`, `st_direcciones`; `pos_clientes` con lectura publica (RA-01) e insercion (RA-04) |
 | POS PWA service worker | `apps/pos/service-worker.js`, skipWaiting, clients.claim, cache-first, rutas relativas |
@@ -1296,7 +1323,7 @@ Cada fase indica que cambio, los archivos y la version del cache. Commits entre 
 | Void + Recreate (Editar Venta) | `ventas.js::cargarEdicion()`, `ventas-historial.js::editarVenta()`, `database.js::anularConRevertir()`. Crear nueva venta PRIMERO, anular original solo si exito. sessionStorage `kubit_editar_venta` + query param `?editar=ID`. Fases 39-40: verifica que la original siga vigente, deshace la nueva si falla anular la original, `#modal-alerta` persistente. |
 | anularConRevertir | `database.js::ventas.anularConRevertir(id, opts)`. Solo CONFIRMADA/PENDIENTE. Devuelve stock con `devolucion_venta` (NO existe `entrada_anulacion`), revierte finanzas mensuales (valores negativos), marca ANULADA solo si el stock quedo bien. Retorna `data.advertencias[]`. |
 | cargarEdicion | `ventas.js::cargarEdicion(v)`. Puebla formulario ventas.html desde objeto venta completo: cliente, fecha, metodo_pago, referencia, vendedor, canal, costos, descuento global, carrito con items. |
-| Store SW service worker | `apps/store/service-worker.js`, ES_LOCAL bypass, cache outletshop-YYYYMMDD-NN, postMessage auto-reload |
+| Store SW service worker | `apps/store/service-worker.js`, ES_LOCAL bypass, cache outletshop-YYYYMMDD-NN, postMessage auto-reload; desde T5a red primero (ver 5.3) |
 | Store SW registration | `navigator.serviceWorker.register`, 8 paginas Store |
 | SW localhost bypass | `self.location.hostname === 'localhost'`, `return;` sin `e.respondWith()` |
 | SW auto-reload | `postMessage({accion:'recargar'})`, `location.reload()` en listener |
@@ -1407,7 +1434,7 @@ Cada fase indica que cambio, los archivos y la version del cache. Commits entre 
 | IVA 0% (exento) | `productos.js` y `configuracion.js` respetan el 0; no usar `\|\|` con valor por defecto 0.19 (Fases 32-33). |
 | Buscar orden de compra por Notas | `compras.js::filtrarYRender()` incluye `c.notas` (Fase 38). |
 | service_role fuera del frontend | `apps/pos/js/config.js` con `supabaseServiceKey: ''` (commit `8bde21d`); crear usuario y cambiar contrasena se hacen en Supabase. |
-| Plan de mejora de la Tienda | `apps/store/specs/hallazgos-tienda.md` (ST-01..ST-31, RA-01..RA-05, D1..D28, T1..T6), `apps/store/memory/progress.md` |
+| Plan de mejora de la Tienda | `apps/store/specs/hallazgos-tienda.md` (ST-01..ST-33, RA-01..RA-05, D1..D39, T1..T6), `apps/store/memory/progress.md` |
 | st_crear_pedido | `specs/15-store-pedido-seguro.sql` (v1) y `specs/17-store-checkout-coherente.sql` (v2, vigente); contrato en `specs/11-api-contracts.md` §9.1 |
 | Envio por zonas | `st_tarifas_envio`, `st_destinos_envio`, `st_zona_envio()`, `st_cotizar_envio()`, `checkout.js::cotizarEnvio()` |
 | Configuracion de la tienda | `st_configuracion` (envio_gratis_desde, pedido_minimo, envio_zona_defecto, bre_b_llave, bre_b_titular, bre_b_qr_url, mercado_pago_link, whatsapp), `st_cfg()`, `st_config_tienda()`, `utils.js::obtenerConfigTienda()` |
@@ -1428,6 +1455,11 @@ Cada fase indica que cambio, los archivos y la version del cache. Commits entre 
 | Tarjetas colapsables de pedidos | `pedidos-web.js::htmlPedido()`, `<details class="grupo-card">` cerrado por defecto, `estilo.css` `.grupo-card` |
 | Tests del POS con node | `tests/pos/*.test.mjs`, `node --test tests/pos/*.test.mjs`, `tests/pos/pedidos-web.test.mjs`, `pedidos-web-ui.test.mjs` |
 | Usuarios del POS vs Auth | `pos_usuario_sesion()`, `auth.users`, AGENTS.md §10.5 |
+| Busqueda del catalogo (T5a) | `productos.js::_filtrarPorBusqueda()`, `_ordenarPorRelevancia()`, `_normalizarBusqueda()`, `_datosBusqueda()`; AGENTS.md §5.3 |
+| Buscador de la barra (ST-32) | `navbar-store.js`, `index.html?q=`, `#buscador`, `#buscador-movil`, `qActual` |
+| Service worker de la tienda (T5a) | `apps/store/service-worker.js`: `redPrimero()`, `cachePrimero()`, `claveCache()`, `precargar()`, `avisarRecarga()`; red primero, sin `ignoreSearch`; probar solo en Vercel |
+| Iconos de la tienda (T5a) | `apps/store/img/icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `apple-touch-icon.png`, `manifest.json` |
+| Tests de la tienda T5a | `tests/store/store-t5a.test.mjs` (35 casos; total tienda 146) |
 
 ## 13. Registro de Cambios (continuacion)
 
@@ -1760,3 +1792,15 @@ Cada fase indica que cambio, los archivos y la version del cache. Commits entre 
 | `.claude/skills` y `.opencode/skills` | `kubit-store` y `kubit-pos` actualizados con pedidos web. |
 | **SQL (ejecutado por el usuario)** | 18 en QA y produccion (2026-11-08). |
 | Tests | `node --test tests/pos/*.test.mjs` → 29 passed; `node --test tests/store/*.test.mjs` → 111 passed; `npm test` → 119 passed. |
+
+##### 2026-11-09 — Tienda: T5a (busqueda, service worker e iconos) documentada
+
+| Archivo | Cambio |
+|---|---|
+| `AGENTS.md` y `CLAUDE.md` | Encabezado; §3.1 (146 casos); nueva §5.3 (busqueda, buscador, service worker e iconos de la tienda); §5.1 (tests y cache); filas antiguas de service worker y favicon marcadas como obsoletas para la tienda; §7.2 (bloque T5a), §7.3, §7.4; §11 (keywords). |
+| `specs/04-store-spec.md` | Nueva §3.12 (busqueda del catalogo); notas en §7.3 (SEO) y §7.4 (PWA). |
+| `specs/12-roadmap.md`, `specs/13-testing-model.md`, `specs/ARCHITECTURE.md` | T5 dividida en T5a (hecha), T5b y T5c; `store-t5a` y 146 casos; iconos y service worker de la tienda. |
+| `apps/store/specs/hallazgos-tienda.md` (v7) y `apps/store/memory/progress.md` | ST-16, ST-20 y ST-21 hechos; nuevos ST-32 y ST-33; decisiones D36 a D39; historial. |
+| `.claude/skills` y `.opencode/skills` | `kubit-store` actualizado con T5a. |
+| **SQL** | Ninguno (T5a es solo frontend). |
+| Tests | `node --test tests/store/*.test.mjs` → 146 passed; `node --test tests/pos/*.test.mjs` → 29 passed; `npm test` → 119 passed. |

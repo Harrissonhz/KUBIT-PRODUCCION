@@ -1,6 +1,6 @@
 # hallazgos-tienda.md — Hallazgos y plan de mejora de la Tienda (apps/store)
 
-**Versión:** v6 · **Fecha:** 2026-11-08 · **Responsable:** Harrisson Zapata
+**Versión:** v7 · **Fecha:** 2026-11-09 · **Responsable:** Harrisson Zapata
 **Alcance:** código de `apps/store` vigente en producción (`outletshop`), políticas RLS reales de producción y decisiones de negocio.
 **Base de datos:** una sola base Supabase por ambiente; prefijos `pos_` (POS), `st_` (Tienda) y `wms_` (WMS). QA = `gbjtdjbopwgbknklwldq`, producción = `gxqcybboiskwznxdioun`.
 
@@ -51,6 +51,10 @@
 | D33 | (2026-11-08) El POS no lee las tablas `st_*` directo: usa funciones `security definer` (`pos_pedido*_web_*`) que validan al usuario y devuelven el pedido con los datos del comprador (por sus políticas, el POS no puede leer `st_direcciones`). |
 | D34 | (2026-11-08) Mensaje inicial de WhatsApp: "Hola {nombre}, te escribimos de OutletShop por tu pedido KBT-… por $X". El correo del comprador solo se muestra si lo escribió (es opcional). |
 | D35 | (2026-11-08) Cada pedido es una tarjeta colapsable **cerrada por defecto**, en "Por gestionar" y en "Gestionados (30 días)"; el encabezado muestra número, cliente, total, medio de pago y la etiqueta "Stock insuficiente". Los textos de cantidad, precio y total tienen color explícito en modo claro y oscuro. |
+| D36 | (2026-11-09) T5 se divide en **T5a** (ST-16, ST-20, ST-21 y ST-32; solo frontend, sin SQL), **T5b** (ST-17: vista previa al compartir y `sitemap.xml`; requiere configuración en Vercel) y **T5c** (ST-18, ST-19 y ST-33: rendimiento). T5a primero por ser de bajo riesgo. |
+| D37 | (2026-11-09) Búsqueda: sin tildes ni mayúsculas, todas las palabras en cualquier orden, sobre nombre, SKU de **todas** las variantes, marca, etiquetas (menos `destacado`) y descripción corta; ordenada por relevancia (SKU exacto, SKU que empieza igual, nombre) y, a igual relevancia, con el orden de la visita de T3a para no romper la paginación. Se calcula en el navegador sobre el catálogo ya cargado: sin SQL. |
+| D38 | (2026-11-09) Service worker de la tienda: red primero para HTML, JS, CSS y manifiesto; caché primero para imágenes; solo GET del mismo sitio; precarga archivo por archivo; recarga las páginas abiertas solo al actualizar (no en la primera visita) y **nunca el checkout**; en `localhost` no actúa (se prueba en el Vercel de calidad). |
+| D39 | (2026-11-09) Íconos PNG (192, 512, maskable 512 con margen seguro y `apple-touch-icon` 180) generados desde `icon.svg`; el favicon sigue siendo `icon.svg`. El peso del SVG (152 KB) queda para T5c (ST-33). Compilar Tailwind queda fuera de alcance salvo que la medición muestre un problema serio. |
 
 **Fuera de alcance por ahora:** analítica (GA, Pixel, Vercel Analytics), reputación de Mercado Libre en la tienda, cédula en el checkout, pasarelas con API.
 
@@ -80,12 +84,12 @@
 | ST-13 | Paginación con barajado repite y oculta productos | P1 | Medio | S | T3a | Hecho 2026-11-08 |
 | ST-14 | Caracteres dañados en textos visibles | — | — | — | — | Cerrado (falso positivo) |
 | ST-15 | El POS no avisa ni permite gestionar pedidos web | P1 | Alto | L | T4 | Hecho 2026-11-08 |
-| ST-16 | Búsqueda limitada (sin SKU, sensible a tildes) | P2 | Medio | M | T5 | Pendiente |
-| ST-17 | Sin vista previa al compartir (SEO / Open Graph) | P2 | Medio | M | T5 | Pendiente |
-| ST-18 | Cada página descarga el catálogo completo | P2 | Bajo | M | T5 | Pendiente |
-| ST-19 | Tailwind desde CDN y embebidos de Instagram pesados | P2 | Bajo | M | T5 | Pendiente |
-| ST-20 | Service worker puede servir versiones viejas | P2 | Bajo | S | T5 | Pendiente |
-| ST-21 | Ícono del manifiesto solo en SVG (iOS) | P2 | Bajo | S | T5 | Pendiente |
+| ST-16 | Búsqueda limitada (sin SKU, sensible a tildes) | P2 | Medio | M | T5a | Hecho 2026-11-09 |
+| ST-17 | Sin vista previa al compartir (SEO / Open Graph) | P2 | Medio | M | T5b | Pendiente |
+| ST-18 | Cada página descarga el catálogo completo | P2 | Bajo | M | T5c | Pendiente |
+| ST-19 | Tailwind desde CDN y embebidos de Instagram pesados | P2 | Bajo | M | T5c | Pendiente |
+| ST-20 | Service worker puede servir versiones viejas | P2 | Bajo | S | T5a | Hecho 2026-11-09 |
+| ST-21 | Ícono del manifiesto solo en SVG (iOS) | P2 | Bajo | S | T5a | Hecho 2026-11-09 |
 | ST-22 | `innerHTML` con datos no escapados (XSS potencial) | P3 | Bajo | M | T6 | Pendiente |
 | ST-23 | Código duplicado y datos de ejemplo | P3 | Bajo | S | T6 | Pendiente |
 | ST-24 | `01-schema.sql` no refleja las políticas RLS de producción | P3 | Bajo | S | T6 | En curso (03, 15 y 16 versionados en T2) |
@@ -96,6 +100,8 @@
 | ST-29 | El ambiente de pruebas de la tienda apuntaba a la base de producción | P0 | — | S | T2 | Hecho 2026-11-03 |
 | ST-30 | Políticas de `st_envios` y `st_pagos_online` dependen de `st_pedidos` | P3 | Bajo | S | T3/T4 | Pendiente (revisar al usarlas) |
 | ST-31 | La configuración de la tienda (tarifas, envío gratis, mínimo, llave, link) solo se cambia por SQL | P2 | Bajo | M | Fase propia (propuesto) | Pendiente |
+| ST-32 | El buscador de la barra no funciona desde otras páginas ni muestra lo buscado | P2 | Medio | S | T5a | Hecho 2026-11-09 |
+| ST-33 | El favicon `icon.svg` pesa 152 KB | P2 | Bajo | S | T5c | Pendiente |
 | RA-01 | Lectura pública de `pos_clientes` (Ley 1581) | — | — | — | — | Aceptado |
 | RA-02 | Reseñas y calificación ficticias en la portada | — | — | — | — | Aceptado |
 | RA-03 | Envío gratis desde $80.000 también en zonas remotas | — | — | — | — | Aceptado |
@@ -191,28 +197,36 @@
 - **Archivos:** `specs/18-pos-pedidos-web.sql`; POS (`apps/pos`): `pedidos-web.html`, `js/paginas/pedidos-web.js`, `js/compartido/pedidos-web-aviso.js`, `js/compartido/database.js` (solo se agregó `DB.pedidosWeb` y la carga del aviso), `service-worker.js` (caché `kubit-pos-20261108-01`); `tests/pos/pedidos-web.test.mjs` y `tests/pos/pedidos-web-ui.test.mjs`.
 - **Hallazgo operativo:** en Supabase Auth de producción solo existe `outletshoptiendavirtual@gmail.com` (los usuarios `admin` y `admin_497a2c95` de `pos_usuarios` no pueden iniciar sesión); en QA, solo `admin_pruebas`. Ver AGENTS.md §10.5.
 
-### ST-16 · Búsqueda limitada — P2 · Ventas: Medio
-- **Evidencia:** `js/api/productos.js` busca solo en nombre y descripción corta; no busca por SKU; "bebe" no encuentra "bebé".
-- **Mitigación:** buscar también por `codigo_interno`; normalizar tildes y mayúsculas.
+### ST-16 · Búsqueda limitada — P2 · Ventas: Medio · ✅ Hecho (T5a)
+- **Evidencia (antes):** `buscar()` y `obtenerPaginados()` de `js/api/productos.js` comparaban la frase completa con el nombre y la descripción corta, con tildes y sin mirar el SKU: "bebe" no encontraba "bebé" y "reno cojin" no encontraba "Funda Cojín Navideña Felpa (Reno / Muñeco Nieve)". Los resultados salían en el orden aleatorio de la visita, así que un SKU exacto podía quedar detrás de otros productos.
+- **Solución aplicada (D37):** una sola función de filtro para las dos rutas (`_filtrarPorBusqueda`) y otra de orden (`_ordenarPorRelevancia`) en `js/api/productos.js`: sin tildes ni mayúsculas, todas las palabras en cualquier orden, sobre nombre, SKU de **todas** las variantes, marca, etiquetas (menos `destacado`) y descripción corta; `AL-119` encuentra `AL119`. Orden: SKU exacto, SKU que empieza igual, nombre que empieza igual, nombre que contiene la frase, SKU que contiene la frase y el resto; a igual relevancia, el orden de la visita de T3a, así la paginación sigue sin repetir ni ocultar productos. Los datos de búsqueda de cada producto se calculan una vez (en una prueba con 450 productos, una búsqueda tardó entre 0,4 y 4 ms). Sin SQL.
+- **Evidencia:** 35 casos de `store-t5a.test.mjs` (tildes, SKU de variantes, relevancia, varias palabras, marca y etiquetas, consultas vacías o con caracteres especiales, paginación estable, categoría y productos digitales); los 7 casos de ST-13 de T3a siguen pasando con la búsqueda nueva. Pruebas manuales en `KUBIT-Pruebas` y prueba de humo en producción exitosas (2026-11-09).
+- **Archivos:** `js/api/productos.js`, `tests/store/store-t5a.test.mjs`.
 
-### ST-17 · Sin SEO ni vista previa al compartir — P2 · Ventas: Medio
+### ST-17 · Sin SEO ni vista previa al compartir — P2 · Ventas: Medio · Pendiente (T5b)
 - **Evidencia:** las fichas se arman en el navegador; sin meta description, Open Graph, datos estructurados ni sitemap.
 - **Mitigación:** metadatos base en todas las páginas; Open Graph por producto (requiere generación del lado del servidor o páginas estáticas, a evaluar en Vercel); `sitemap.xml` y `robots.txt`.
 
-### ST-18 · Catálogo completo en cada página — P2 · Ventas: Bajo
+### ST-18 · Catálogo completo en cada página — P2 · Ventas: Bajo · Pendiente (T5c)
 - **Evidencia:** `js/api/productos.js` consulta `select=*` con detalle y multimedia de todos los productos, incluso para "relacionados".
 - **Mitigación:** seleccionar solo columnas necesarias y consultar por página o por producto.
 
-### ST-19 · Tailwind por CDN e Instagram embebido — P2 · Ventas: Bajo
+### ST-19 · Tailwind por CDN e Instagram embebido — P2 · Ventas: Bajo · Pendiente (T5c)
 - **Evidencia:** `index.html` carga Tailwind desde CDN en producción y embebidos de Instagram.
 - **Mitigación:** CSS de Tailwind compilado; cargar Instagram solo al hacer scroll o reemplazarlo por imágenes con enlace.
 
-### ST-20 · Service worker con versiones viejas — P2 · Ventas: Bajo
-- **Evidencia:** `service-worker.js` sirve primero la caché y oculta errores de instalación. Versión actual: `outletshop-20261108-02` (T3b) (T2).
-- **Mitigación:** mismo patrón del POS y WMS (versión por deploy, aviso de recarga); red primero para HTML.
+### ST-20 · Service worker con versiones viejas — P2 · Ventas: Bajo · ✅ Hecho (T5a)
+- **Evidencia (antes):** `service-worker.js` respondía primero con lo guardado, aunque fuera una versión vieja; la precarga era de todo o nada (si un archivo fallaba no se guardaba ninguno y no se avisaba); `colombia.js` no estaba en la lista; al activarse recargaba todas las páginas abiertas, también en la primera visita y en pleno checkout. Versión anterior de la caché: `outletshop-20261108-02`.
+- **Solución aplicada (D38):** reescrito (ver `AGENTS.md` §5.3): red primero para HTML, JS, CSS y manifiesto (la copia guardada solo sin conexión); caché primero para imágenes y demás archivos locales; solo GET del mismo sitio (Supabase, WhatsApp, Mercado Pago, fuentes y CDN pasan directo); clave de caché sin `?consulta` (`?q=`, `?slug=`, `?pagina=`) y `/` equivale a `index.html`; se ignoran copias con redirección; precarga archivo por archivo, con `colombia.js` y los íconos; recarga las páginas abiertas solo si ya había una caché anterior y nunca la de `checkout.html`; en `localhost` no precarga ni intercepta. Caché `outletshop-20261109-01`.
+- **Evidencia:** pruebas con un navegador simulado (estrategias, caché sin consulta, sin conexión, redirecciones, errores del servidor, POST y otros sitios, localhost, primera visita y actualización, y que cada archivo de la lista exista). El service worker no corre en `localhost`: se verifica en el Vercel de calidad (Manifest, Cache Storage, sin conexión, búsqueda y checkout sin recarga). Prueba de humo en producción exitosa (2026-11-09).
+- **Efecto a tener en cuenta:** cada visita pregunta al servidor si HTML, JS y CSS cambiaron; Vercel responde sin descargar nada si no cambiaron. A cambio nunca se ven precios o textos viejos.
+- **Archivos:** `service-worker.js`, `tests/store/store-t5a.test.mjs`.
 
-### ST-21 · Ícono del manifiesto en SVG — P2 · Ventas: Bajo
-- **Mitigación:** íconos PNG 192 y 512 y `apple-touch-icon` en `manifest.json` y en el HTML.
+### ST-21 · Ícono del manifiesto en SVG — P2 · Ventas: Bajo · ✅ Hecho (T5a)
+- **Evidencia (antes):** `manifest.json` solo tenía el SVG, marcado `any maskable`; el `apple-touch-icon` de `index.html` también apuntaba al SVG (iPhone necesita PNG).
+- **Solución aplicada (D39):** PNG generados desde `icon.svg`: `icon-192.png`, `icon-512.png`, `icon-maskable-512.png` (todo el logo dentro del círculo seguro del 40 %, comprobado píxel a píxel) y `apple-touch-icon.png` (180x180). `manifest.json` los declara con su `purpose` (`any` o `maskable`, nunca los dos) y mantiene el SVG como `any`. Las 8 páginas apuntan el `apple-touch-icon` al PNG. El favicon sigue siendo `icon.svg`.
+- **Evidencia:** pruebas de tamaño real de cada PNG y de que el manifiesto y las 8 páginas coincidan; revisión visual de los íconos (recorte circular y cuadrado redondeado).
+- **Archivos:** `manifest.json`, `img/icon-192.png`, `img/icon-512.png`, `img/icon-maskable-512.png`, `img/apple-touch-icon.png` y las 8 páginas `.html`.
 
 ### ST-22 · XSS potencial — P3 · Ventas: Bajo
 - **Evidencia:** `innerHTML` con nombres de producto, datos de `localStorage` y mensajes de error en `js/compartido/card-producto.js`, `js/paginas/producto.js`, `js/paginas/carrito.js` y otros.
@@ -263,6 +277,15 @@
 - **Mitigación mientras tanto:** `UPDATE` documentados en `specs/11-api-contracts.md` §9.4 y al pie de `specs/17-store-checkout-coherente.sql`.
 - **Fase:** propuesta como fase propia (ya no va en T4, que se redujo a avisar y gestionar por WhatsApp); sin aprobar.
 
+### ST-32 · El buscador de la barra no funciona desde otras páginas — P2 · Ventas: Medio · ✅ Hecho (T5a)
+- **Evidencia (antes):** en `js/compartido/navbar-store.js` Enter navegaba a `?q=...` (relativo): en la ficha de un producto abría `producto.html?q=...`, sin producto, y el campo no mostraba lo buscado. Se encontró al revisar el código para ST-16.
+- **Solución aplicada:** Enter (escritorio y móvil) lleva a `index.html?q=...` desde cualquier página y el campo muestra el texto buscado (`?q=`). Los resultados salen de la búsqueda nueva (ST-16).
+- **Archivos:** `js/compartido/navbar-store.js`, `tests/store/store-t5a.test.mjs`.
+
+### ST-33 · El favicon `icon.svg` pesa 152 KB — P2 · Ventas: Bajo · Pendiente (T5c)
+- **Evidencia (2026-11-09):** `img/icon.svg` (371x315, la vectorización de una imagen) pesa 152 KB y se descarga como favicon en las 8 páginas (`<link rel="icon" type="image/svg+xml" href="img/icon.svg">`).
+- **Mitigación:** un favicon PNG de unos 48 px pesaría del orden de pocos KB. Se decide en T5c, con la medición de rendimiento.
+
 ## 6. Riesgos aceptados
 
 | ID | Riesgo | Decisión | Revisión |
@@ -282,7 +305,9 @@
 | **T3a WhatsApp y paginación** | ST-12, ST-13 | Solo frontend | T2 | ✅ Hecho 2026-11-08 (`92dc65b`, `272bc1d`) |
 | **T3b Checkout coherente** | ST-09, ST-10, ST-11 | SQL (`17`) + frontend | T3a | ✅ Hecho 2026-11-08 (`679251a`) |
 | **T4 Pedidos web en el POS** | ST-15 | POS + SQL (`18`) | T3b | ✅ Hecho 2026-11-08 (`1bddcb5`) |
-| **T5 Alcance y rendimiento** | ST-16 a ST-21 | Frontend + Vercel | Ninguna | Pendiente |
+| **T5a Búsqueda, service worker e íconos** | ST-16, ST-20, ST-21, ST-32 | Solo frontend | Ninguna | ✅ Hecho 2026-11-09 (`6d052a9`) |
+| **T5b Vista previa al compartir** | ST-17 | Frontend + Vercel | T5a | Pendiente |
+| **T5c Rendimiento** | ST-18, ST-19, ST-33 | Frontend + Vercel | T5a | Pendiente (medir antes con PageSpeed) |
 | **T6 Deuda técnica** | ST-22, ST-23, ST-24, ST-30, RA-04 | Frontend + SQL + documentación | Puede ir junto con otras fases | Pendiente |
 
 **Método de trabajo (igual que POS y WMS):** un cambio a la vez; análisis con archivos reales (subidos desde el disco local, no desde el visor de OneDrive); plan y luz verde; archivos completos (si el navegador no deja descargar HTML, se entregan en un `.zip`); pruebas en `KUBIT-Pruebas` contra QA; copia a `KUBIT-PRODUCCION` **sin** los 3 archivos de credenciales; commit con `git add` por archivo (nunca `git add .`); prueba de humo en Vercel; actualizar este documento y `memory/progress.md`.
@@ -316,7 +341,8 @@
 - `tests/store/store-t3a.test.mjs`: 15 casos de T3a (mensaje y logo de WhatsApp, paginación por visita).
 - `tests/store/store-t3b.test.mjs`: 37 casos de T3b (configuración, envío por zona y gratis, días, pedido mínimo, 3 medios de pago, confirmación, stock insuficiente, carrito, textos legales, caché y reglas del script 17).
 - `tests/pos/pedidos-web.test.mjs` (23 casos) y `tests/pos/pedidos-web-ui.test.mjs` (6): T4, en el POS (`DB.pedidosWeb`, aviso una vez por sesión, menú, tarjeta del Panel, página, tarjetas colapsables, colores y reglas del script 18).
-- Ejecutar desde la raíz: `node --test tests/store/*.test.mjs` (111/111), `node --test tests/pos/*.test.mjs` (29/29) y `npm test` (Vitest, 119/119).
+- `tests/store/store-t5a.test.mjs`: 35 casos de T5a (búsqueda, orden y paginación estable, buscador de la barra, service worker con navegador simulado, manifiesto e íconos).
+- Ejecutar desde la raíz: `node --test tests/store/*.test.mjs` (146/146), `node --test tests/pos/*.test.mjs` (29/29) y `npm test` (Vitest, 119/119).
 - Cada fase agrega su propio archivo de test y los anteriores deben seguir pasando.
 
 ### Criterios de aceptación por fase
@@ -326,7 +352,9 @@
 - **T3a (✅ 2026-11-08):** "Preguntar por WhatsApp" con producto, opción, SKU, precio y enlace, y logo completo; la paginación no repite productos en una visita; tests 74/74.
 - **T3b (✅ 2026-11-08):** el envío cambia según departamento/ciudad (zona) y se muestran los días; desde $80.000 es $0; bajo $15.000 no se crea el pedido; carrito, checkout y pedido muestran el mismo total; solo aparecen los 3 medios de pago reales; la confirmación muestra instrucciones y el botón "Confirmar por WhatsApp"; la ficha tiene "Preguntar por WhatsApp" con el producto; la paginación no repite productos.
 - **T4 (✅ 2026-11-08):** un pedido nuevo aparece en el aviso al entrar (una vez por sesión), en el contador del menú y en el Panel; la página muestra nombre, celular, correo (si existe), dirección, productos y totales, con tarjetas cerradas por defecto; "Escribir por WhatsApp" abre el chat con el mensaje acordado; cerrar como "Venta registrada" (con o sin número de venta) pasa a `CONFIRMADO` y como "No se concretó" a `CANCELADO`; el número de venta inexistente no cierra el pedido; el pedido web no mueve inventario; POS y WMS sin cambios de comportamiento; tests 29/29, 111/111 y 119/119.
-- **T5:** al compartir un enlace se ve imagen, nombre y precio; la búsqueda encuentra por SKU y sin tildes; mejora la carga en celular.
+- **T5a (✅ 2026-11-09):** la búsqueda encuentra por SKU de cualquier variante, marca y etiquetas, sin importar tildes ni mayúsculas, y el SKU exacto sale primero sin romper la paginación; el buscador funciona desde cualquier página y muestra lo buscado; HTML, JS y CSS salen de la red y no se ven versiones viejas; el checkout no se recarga solo; el manifiesto y el `apple-touch-icon` usan PNG; tests 146/146, 29/29 y 119/119.
+- **T5b:** al compartir un enlace de un producto se ve imagen, nombre y precio; hay `sitemap.xml` y `robots.txt`.
+- **T5c:** mejora medida de la carga en celular (catálogo más liviano, Tailwind, Instagram diferido y favicon).
 - **T6:** sin `innerHTML` con datos sin escapar; `01-schema.sql` (o su script complementario) coincide con `pg_policies` de producción; decisión final sobre RA-04.
 
 ## 8. Tareas operativas
@@ -348,3 +376,4 @@
 | v4 | 2026-11-08 | T3a publicada (`92dc65b`, `272bc1d`): ST-12 y ST-13 hechos. T3b en QA con `specs/17-store-checkout-coherente.sql`; decisiones D21–D28; tests 111/111. |
 | v5 | 2026-11-08 | T3b publicada (`679251a`): ST-09, ST-10 y ST-11 hechos; tarifas reales en producción; RA-03 ratificado con las tarifas reales; nuevo ST-31 (configuración solo por SQL); OP-03. |
 | v6 | 2026-11-08 | T4 publicada (`1bddcb5`): ST-15 hecho (aviso, página `pedidos-web.html` y cierre del pedido con script `18`); decisiones D29–D35; ST-31 pasa a fase propia; OP-04; tests POS 29/29. |
+| v7 | 2026-11-09 | T5a publicada (`6d052a9`; Pruebas `677a26e`): ST-16, ST-20 y ST-21 hechos; nuevos ST-32 (buscador desde otras páginas, hecho) y ST-33 (favicon de 152 KB, pendiente); decisiones D36–D39; T5 se divide en T5a, T5b y T5c; tests tienda 146/146. |

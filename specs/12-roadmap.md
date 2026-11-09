@@ -472,7 +472,9 @@ Integración de pagos y gestión de pedidos.
 | T3b Checkout coherente | Envio por zona, envio gratis, pedido minimo, 3 medios de pago, confirmacion con WhatsApp | Hecho 2026-11-08 (`679251a`) |
 | T4 Pedidos web en el POS | Aviso al entrar, contador en el menu, tarjeta en el Panel, `pedidos-web.html`, WhatsApp y cierre del pedido (venta registrada o no se concreto) | Hecho 2026-11-08 (`1bddcb5`) |
 | ST-31 Configuracion de la tienda en el POS | Pantalla para editar tarifas, llave y link sin SQL (propuesta; requiere funciones que validen administrador) | Pendiente (sin aprobar) |
-| T5 Alcance y rendimiento | Busqueda por SKU y sin tildes, SEO/Open Graph, consultas mas livianas, Tailwind compilado, service worker, iconos PNG | Pendiente |
+| T5a Busqueda, service worker e iconos | Busqueda por SKU, marca y etiquetas sin tildes y por relevancia (ST-16), buscador desde cualquier pagina (ST-32), service worker con red primero (ST-20), iconos PNG (ST-21) | Hecho 2026-11-09 (`6d052a9`) |
+| T5b Vista previa al compartir | Open Graph por producto, `sitemap.xml` y `robots.txt` (ST-17); requiere configuracion en Vercel | Pendiente |
+| T5c Rendimiento | Consultas mas livianas (ST-18), Tailwind compilado e Instagram diferido (ST-19), favicon de 152 KB (ST-33); medir antes con PageSpeed | Pendiente |
 | T6 Deuda tecnica | Escape de HTML, codigo duplicado, `01-schema.sql` alineado con politicas, ST-30, RA-04 | Pendiente |
 
 ## Academy (Post-Store)
@@ -523,3 +525,4 @@ Módulo de aprendizaje con cursos, lecciones y progreso de estudiantes.
 | 2026-05-23 | 1.0 | Versión inicial del roadmap con 9 fases POS + 3 fases Store + Academy reservada. |
 | 2026-11-08 | 1.1 | Seccion "Store — Estado real y plan de mejora" con las fases T1 a T6 de la tienda. |
 | 2026-11-08 | 1.2 | T4 (pedidos web en el POS) hecha; ST-31 queda como propuesta aparte. |
+| 2026-11-09 | 1.3 | T5 dividida en T5a (hecha), T5b y T5c. |

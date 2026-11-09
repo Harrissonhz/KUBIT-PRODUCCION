@@ -10,12 +10,12 @@ metadata:
 
 # Módulo Tienda Virtual - Kubit
 
-Este skill resume las reglas **vigentes en producción** (noviembre de 2026, fases T1 a T4) del módulo Store (Tienda Virtual): catálogo público, carrito y pedidos web como invitado que se confirman y cobran por WhatsApp, y su gestión desde el POS.
+Este skill resume las reglas **vigentes en producción** (noviembre de 2026, fases T1 a T5a) del módulo Store (Tienda Virtual): catálogo público, carrito y pedidos web como invitado que se confirman y cobran por WhatsApp, y su gestión desde el POS.
 
-**Antes de cambiar código o SQL de la tienda, leer:**
+**Antes de cambiar código o SQL de la tienda, leer** (para la búsqueda, el service worker o los íconos: `AGENTS.md` §5.3):
 1. `AGENTS.md` §5.1 (reglas de la tienda), §5.2 (pedidos web en el POS), §10.4 y §10.5 (credenciales por ambiente y usuarios del POS).
-2. `apps/store/specs/hallazgos-tienda.md` (hallazgos ST-01 a ST-31, riesgos RA-01 a RA-05, decisiones D1 a D35, plan T1 a T6).
-3. `specs/04-store-spec.md` §2.6, §3.4, §3.9, §3.10, §3.11 y §5.3, y `specs/11-api-contracts.md` §9 y §10.
+2. `apps/store/specs/hallazgos-tienda.md` (hallazgos ST-01 a ST-33, riesgos RA-01 a RA-05, decisiones D1 a D39, plan T1 a T6).
+3. `specs/04-store-spec.md` §2.6, §3.4, §3.9, §3.10, §3.11, §3.12 y §5.3, y `specs/11-api-contracts.md` §9 y §10.
 
 Ante una contradicción con otros documentos antiguos (checkout de 7 operaciones REST, registro obligatorio, pasarela integrada, descuento de inventario, estados `PAGADO`/`ENVIADO`/`ENTREGADO`), **prevalece este skill** junto con los documentos de arriba.
 
@@ -34,6 +34,8 @@ Ante una contradicción con otros documentos antiguos (checkout de 7 operaciones
 - Una variante con stock 0 se ve tachada y no se puede agregar.
 - Ficha: botón "Preguntar por WhatsApp" con producto, opción, SKU, precio y enlace (consulta, no crea pedido).
 - Paginación con orden aleatorio **fijo por visita** (semilla en `sessionStorage`, clave `kubit_orden_semilla`).
+- **Búsqueda (T5a):** `productos.js::_filtrarPorBusqueda()` y `_ordenarPorRelevancia()`. Sin tildes ni mayúsculas; todas las palabras en cualquier orden sobre nombre, SKU de **todas** las variantes, marca, etiquetas (menos `destacado`) y descripción corta. Orden: SKU exacto, SKU que empieza igual, nombre, resto; a igual relevancia, el orden de la visita (no romper la paginación). Se calcula en el navegador: sin SQL.
+- **Buscador de la barra (T5a):** Enter lleva a `index.html?q=...` desde cualquier página y muestra lo buscado. No existe la ruta `/buscar`.
 
 ### Carrito
 - Vive en `localStorage` (`kubit_carrito`). Cada línea es una **variante** (`detalleId`); las líneas sin variante se descartan con aviso.
@@ -70,6 +72,12 @@ Ante una contradicción con otros documentos antiguos (checkout de 7 operaciones
 - Esas tablas no están abiertas a `anon` ni a `authenticated`; se leen con funciones `security definer`.
 - Si cambian `envio_gratis_desde` o `pedido_minimo`, actualizar también los montos escritos en `terminos-condiciones.html` y `preguntas-frecuentes.html`.
 
+### Service worker e íconos (T5a)
+- `apps/store/service-worker.js`: **red primero** para HTML, JS, CSS y manifiesto (la copia guardada solo sin conexión); caché primero para imágenes; solo GET del mismo sitio (Supabase, WhatsApp, Mercado Pago, fuentes y CDN pasan directo); clave de caché sin `?consulta` y `/` = `index.html`; precarga archivo por archivo (incluye `colombia.js` y los PNG).
+- Al actualizar recarga las páginas abiertas **solo si ya había una caché anterior y nunca `checkout.html`** (mensaje `{accion:'recargar'}`). En `localhost` no actúa: **probar el service worker solo en el Vercel de calidad**.
+- Las reglas antiguas de la tienda sobre cache-first, `ignoreSearch:true` y `.catch(() => fetch())` están **obsoletas** para la tienda (siguen en el POS).
+- Íconos: `img/icon-192.png`, `img/icon-512.png`, `img/icon-maskable-512.png` (todo el logo dentro del círculo seguro del 40 %) y `img/apple-touch-icon.png` (180x180, en las 8 páginas). El favicon sigue siendo `icon.svg` (152 KB, ST-33 pendiente para T5c).
+
 ## Seguridad y ambientes
 - Rol `anon`: sin acceso a `st_pedidos`, `st_pedidos_detalle`, `st_direcciones` ni a las tablas de configuración. Ejecuta `st_crear_pedido`, `st_cotizar_envio` y `st_config_tienda`. `pos_clientes` conserva lectura pública (RA-01) e inserción (RA-04, temporal).
 - Credenciales por ambiente: **nunca** copiar entre `KUBIT-Pruebas` (QA) y `KUBIT-PRODUCCION` los archivos `apps/store/js/api/supabase-client.js`, `apps/pos/js/config.js` y `apps/wms/js/config.js`.
@@ -82,7 +90,7 @@ Ante una contradicción con otros documentos antiguos (checkout de 7 operaciones
 - Un script que carga valores de prueba se acompaña, en producción, de los `UPDATE` con valores reales en la misma sesión.
 
 ## Tests
-- Tienda: `node --test tests/store/*.test.mjs` (111 casos; `.mjs`, `node:test` + `node:vm`, sin tocar la base; los SQL se validan como texto).
+- Tienda: `node --test tests/store/*.test.mjs` (146 casos; `.mjs`, `node:test` + `node:vm`, sin tocar la base; los SQL se validan como texto).
 - Pedidos web del POS: `node --test tests/pos/*.test.mjs` (29 casos, mismo estilo).
 - POS: `npm test` (Vitest, 119; solo `tests/**/*.test.js`). No crear tests de la tienda ni de pedidos web con extensión `.js`.
 - Cada fase agrega su propio archivo de test y los anteriores deben seguir pasando. `ambiente.test.mjs` verifica que la tienda apunte al mismo proyecto que el POS/WMS y use la llave `anon`.
@@ -92,5 +100,5 @@ Ante una contradicción con otros documentos antiguos (checkout de 7 operaciones
 - Todos los IDs son UUID v4.
 - Soft delete con `deleted_at` nullable.
 - Timestamps con `timestamptz` y `default now()`; fechas del pedido en hora de Bogotá.
-- Caché de la tienda: `apps/store/service-worker.js`, `outletshop-YYYYMMDD-NN`, se sube en cada deploy (vigente `outletshop-20261108-02`). Caché del POS: `kubit-pos-YYYYMMDD-NN` (vigente `kubit-pos-20261108-01`).
+- Caché de la tienda: `apps/store/service-worker.js`, `outletshop-YYYYMMDD-NN`, se sube en cada deploy (vigente `outletshop-20261109-01`). Caché del POS: `kubit-pos-YYYYMMDD-NN` (vigente `kubit-pos-20261108-01`).
 - Archivos modificados conservan su formato de fin de línea (CRLF o LF) y UTF-8.

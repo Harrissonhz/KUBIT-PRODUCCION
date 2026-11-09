@@ -1,6 +1,6 @@
 # Especificación del Módulo Tienda Virtual - Kubit
 
-> **Estado real (2026-11-08):** este documento describe el alcance completo previsto de la tienda. Lo **implementado y vigente en produccion** esta en las secciones marcadas "(vigente)": §2.6, §3.4, §3.9, §3.10 y §5.3. Varias funciones descritas en otras secciones (carrito en DB, cuentas de cliente, pasarela integrada, cupones, reseñas, wishlist, descuento de inventario al pagar) **no estan implementadas** y algunas fueron descartadas por decision de negocio. Ante una contradiccion, prevalecen §5.1 de `AGENTS.md` y `apps/store/specs/hallazgos-tienda.md` (decisiones D1-D28).
+> **Estado real (2026-11-09):** este documento describe el alcance completo previsto de la tienda. Lo **implementado y vigente en produccion** esta en las secciones marcadas "(vigente)": §2.6, §3.4, §3.9, §3.10, §3.11, §3.12 y §5.3. Varias funciones descritas en otras secciones (carrito en DB, cuentas de cliente, pasarela integrada, cupones, reseñas, wishlist, descuento de inventario al pagar) **no estan implementadas** y algunas fueron descartadas por decision de negocio. Ante una contradiccion, prevalecen §5.1 de `AGENTS.md` y `apps/store/specs/hallazgos-tienda.md` (decisiones D1-D39).
 
 ## 1. Descripción General
 El módulo **Store (Tienda Virtual)** es el componente de comercio electrónico del ecosistema Kubit. Permite la venta de productos a través de un catálogo público en línea, con carrito de compras, checkout, procesamiento de pagos y gestión de pedidos.
@@ -657,6 +657,13 @@ Los datos de pago aparecen **solo después** de crear el pedido. Si el pedido ti
 - **Inventario y ventas:** el pedido web y su cierre **no mueven inventario, no crean ventas ni clientes** (D2). La venta se registra a mano en Ventas con el canal Web y el cliente creado en Clientes (o `222222222222`).
 - **Fuera de alcance (descartado por decisión):** estados `PAGADO`, `ENVIADO`, `ENTREGADO`, registro de pagos, transportadora y guía, y "Crear venta en POS" automático.
 
+#### 3.12 Búsqueda del catálogo, buscador y service worker (vigente desde T5a)
+- **Búsqueda:** `js/api/productos.js` (`buscar()` y `obtenerPaginados()`, con `_filtrarPorBusqueda()`). Sin tildes ni mayúsculas; todas las palabras deben aparecer, en cualquier orden, en el nombre, el SKU de **todas** las variantes, la marca, las etiquetas (menos `destacado`) y la descripción corta. `AL-119` encuentra `AL119`. Se calcula en el navegador sobre el catálogo ya cargado (sin SQL).
+- **Orden de resultados:** 0 SKU exacto, 1 SKU que empieza igual, 2 nombre que empieza igual, 3 nombre que contiene la frase, 4 SKU que contiene la frase, 5 el resto; a igual relevancia, el orden de la visita (§3.1, paginación estable de T3a). Sin búsqueda, el orden no cambia.
+- **Buscador de la barra:** Enter (escritorio y móvil) lleva a `index.html?q=...` desde cualquier página y el campo muestra lo buscado. La ruta `/buscar?q=` de §7.1 **no existe**: los resultados se muestran en `index.html`.
+- **Service worker:** red primero para HTML, JS, CSS y manifiesto (copia guardada solo sin conexión); caché primero para imágenes; solo GET del mismo sitio; precarga archivo por archivo; al actualizar recarga las páginas abiertas solo si ya había una caché anterior y nunca `checkout.html`; en `localhost` no actúa. Caché `outletshop-20261109-01`. Detalle en `AGENTS.md` §5.3.
+- **Íconos:** `manifest.json` con PNG de 192, 512 y un maskable de 512, más `apple-touch-icon.png` (180x180) en las 8 páginas; el favicon sigue siendo `icon.svg`.
+
 ## 4. Flujos del Sistema
 
 ### 4.1 Flujo de Compra Completo (Cliente)
@@ -800,12 +807,12 @@ where table_schema = 'public' and grantee = 'anon' and table_name in ('st_pedido
 ### 7.3 SEO
 - URLs amigables con slugs generados del nombre del producto
 - Meta tags (title, description, og:image) por producto y categoría
-- Sitemap XML generado dinámicamente
+- Sitemap XML generado dinámicamente _(no implementado; previsto en T5b, ST-17)_
 - Schema.org (Product, Organization, BreadcrumbList)
 
 ### 7.4 PWA
 - Instalable en dispositivos iOS, Android y escritorio
-- Modo offline parcial (catálogo en caché, carrito local)
+- Modo offline parcial (catálogo en caché, carrito local). **Vigente desde T5a (§3.12):** HTML, JS y CSS van por red primero y la copia guardada solo se usa sin conexión; íconos PNG para Android e iPhone
 - Notificaciones push para cambios de estado del pedido
 
 ---
