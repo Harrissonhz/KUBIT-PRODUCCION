@@ -95,6 +95,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
   actualizarBadgeCarrito();
 
+  // T5a (ST-32): el buscador muestra lo que se busco (?q=...)
+  const qActual = new URLSearchParams(window.location.search).get('q');
+  if (qActual) {
+    const $buscadorEscritorio = document.getElementById('buscador');
+    const $buscadorMovil = document.getElementById('buscador-movil');
+    if ($buscadorEscritorio) $buscadorEscritorio.value = qActual;
+    if ($buscadorMovil) $buscadorMovil.value = qActual;
+  }
+
   const btnMenu = document.getElementById('btn-menu-movil');
   const menuMovil = document.getElementById('menu-movil');
   btnMenu.addEventListener('click', () => {
@@ -110,14 +119,14 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('buscador')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       const termino = e.target.value.trim();
-      if (termino) window.location.href = `?q=${encodeURIComponent(termino)}`;
+      if (termino) window.location.href = `index.html?q=${encodeURIComponent(termino)}`;
     }
   });
 
   document.getElementById('buscador-movil')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       const termino = e.target.value.trim();
-      if (termino) window.location.href = `?q=${encodeURIComponent(termino)}`;
+      if (termino) window.location.href = `index.html?q=${encodeURIComponent(termino)}`;
     }
   });
 });

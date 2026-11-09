@@ -75,6 +75,93 @@ function _ordenSesion(productos) {
   return _barajarConSemilla(base, _semillaSesion());
 }
 
+// T5a (ST-16): busqueda sin tildes ni mayusculas, por palabras (todas deben aparecer, en cualquier
+// orden) en nombre, SKU de todas las variantes, marca, etiquetas (menos "destacado") y descripcion
+// corta. Con busqueda, los resultados salen por relevancia (SKU exacto o que empieza igual, luego
+// nombre, luego el resto) y, a igual relevancia, conservan el orden de la visita: la paginacion no cambia.
+function _normalizarBusqueda(texto) {
+  return String(texto == null ? '' : texto)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+function _compactoBusqueda(texto) {
+  return texto.replace(/[^a-z0-9]/g, '');
+}
+function _palabrasBusqueda(termino) {
+  var t = _normalizarBusqueda(termino);
+  return t ? t.split(' ') : [];
+}
+// Los datos de busqueda de cada producto se calculan una sola vez (filtro y orden los reutilizan)
+var _datosBusquedaGuardados = typeof WeakMap === 'function' ? new WeakMap() : null;
+function _datosBusqueda(p) {
+  var guardados = _datosBusquedaGuardados && _datosBusquedaGuardados.get(p);
+  if (guardados) return guardados;
+  var skus = [p.codigo_interno]
+    .concat((p.variantes || []).map(function(v) { return v.codigo_interno; }))
+    .filter(function(s) { return !!s; })
+    .map(function(s) { return _normalizarBusqueda(s); });
+  var compactos = skus.map(function(s) { return _compactoBusqueda(s); });
+  var nombre = _normalizarBusqueda(p.nombre);
+  var etiquetas = (p.tags || [])
+    .filter(function(e) { return e !== 'destacado'; })
+    .map(function(e) { return _normalizarBusqueda(e); });
+  var datos = {
+    nombre: nombre,
+    skus: skus,
+    compactos: compactos,
+    texto: [nombre, skus.join(' '), compactos.join(' '), _normalizarBusqueda(p.marca),
+      etiquetas.join(' '), _normalizarBusqueda(p.descripcion_corta)].join(' ')
+  };
+  if (_datosBusquedaGuardados) _datosBusquedaGuardados.set(p, datos);
+  return datos;
+}
+// Una palabra coincide si esta en el texto o, escrita con guiones/espacios/signos ("AL-119", "seg-011"),
+// coincide con el SKU sin separadores ("AL119"). Con menos de 3 letras o numeros no se relaja la regla.
+function _coincidePalabra(texto, palabra) {
+  if (texto.indexOf(palabra) !== -1) return true;
+  var compacta = _compactoBusqueda(palabra);
+  return compacta.length >= 3 && compacta !== palabra && texto.indexOf(compacta) !== -1;
+}
+function _filtrarPorBusqueda(productos, termino) {
+  var palabras = _palabrasBusqueda(termino);
+  if (!palabras.length) return productos;
+  return productos.filter(function(p) {
+    var texto = _datosBusqueda(p).texto;
+    return palabras.every(function(w) { return _coincidePalabra(texto, w); });
+  });
+}
+// Menor numero = mas relevante: 0 SKU exacto, 1 SKU que empieza igual, 2 nombre que empieza igual,
+// 3 nombre que contiene la frase, 4 SKU que contiene la frase, 5 el resto (palabras sueltas)
+function _puntajeBusqueda(p, frase, fraseCompacta) {
+  var d = _datosBusqueda(p);
+  var i;
+  for (i = 0; i < d.skus.length; i++) {
+    if (d.skus[i] === frase || (fraseCompacta && d.compactos[i] === fraseCompacta)) return 0;
+  }
+  for (i = 0; i < d.skus.length; i++) {
+    if (d.skus[i].indexOf(frase) === 0 || (fraseCompacta && d.compactos[i].indexOf(fraseCompacta) === 0)) return 1;
+  }
+  if (d.nombre.indexOf(frase) === 0) return 2;
+  if (d.nombre.indexOf(frase) !== -1) return 3;
+  for (i = 0; i < d.skus.length; i++) {
+    if (d.skus[i].indexOf(frase) !== -1) return 4;
+  }
+  return 5;
+}
+function _ordenarPorRelevancia(productos, termino) {
+  var palabras = _palabrasBusqueda(termino);
+  if (!palabras.length) return productos;
+  var frase = palabras.join(' ');
+  var compacta = _compactoBusqueda(frase);
+  return productos
+    .map(function(p, i) { return { p: p, i: i, s: _puntajeBusqueda(p, frase, compacta) }; })
+    .sort(function(a, b) { return (a.s - b.s) || (a.i - b.i); })
+    .map(function(x) { return x.p; });
+}
+
 function _extraerDescripcionCorta(texto) {
   if (!texto) return '';
   var punto = texto.indexOf('.');
@@ -240,12 +327,9 @@ window.StoreAPI.productos = {
   },
 
   async buscar(termino) {
-    var t = termino.toLowerCase();
+    // T5a (ST-16): sin tildes, por palabras, con SKU, marca y etiquetas; por relevancia
     var productos = await _fetchProductos();
-    return _shuffleArray(productos.filter(function(p) {
-      return p.nombre.toLowerCase().indexOf(t) !== -1 ||
-        p.descripcion_corta.toLowerCase().indexOf(t) !== -1;
-    }));
+    return _ordenarPorRelevancia(_ordenSesion(_filtrarPorBusqueda(productos, termino)), termino);
   },
 
   async obtenerPaginados(pagina, porPagina, filtros) {
@@ -255,17 +339,14 @@ window.StoreAPI.productos = {
         productos = productos.filter(function(p) { return p.categoria === filtros.categoria; });
       }
       if (filtros.query) {
-        var t = filtros.query.toLowerCase();
-        productos = productos.filter(function(p) {
-          return p.nombre.toLowerCase().indexOf(t) !== -1 ||
-            p.descripcion_corta.toLowerCase().indexOf(t) !== -1;
-        });
+        productos = _filtrarPorBusqueda(productos, filtros.query);   // T5a (ST-16)
       }
     }
     var esCategoriaCurso = filtros && filtros.categoria === 'cursos-virtuales';
     productos = productos.filter(function(p) { return esCategoriaCurso || p.tipo !== 'Digital'; });
     var total = productos.length;
     productos = _ordenSesion(productos);   // T3a (ST-13)
+    productos = _ordenarPorRelevancia(productos, filtros && filtros.query);   // T5a (ST-16)
     var totalPaginas = Math.max(1, Math.ceil(total / porPagina));
     var inicio = (pagina - 1) * porPagina;
     return {
