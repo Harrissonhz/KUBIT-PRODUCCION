@@ -470,7 +470,8 @@ Integración de pagos y gestión de pedidos.
 | T2 Pedido seguro | `st_crear_pedido`, cierre de acceso anonimo, numero por secuencia, cliente generico | Hecho 2026-11-03 (`b3bc908`) |
 | T3a WhatsApp y paginacion | "Preguntar por WhatsApp" en la ficha, paginacion estable | Hecho 2026-11-08 (`92dc65b`, `272bc1d`) |
 | T3b Checkout coherente | Envio por zona, envio gratis, pedido minimo, 3 medios de pago, confirmacion con WhatsApp | Hecho 2026-11-08 (`679251a`) |
-| T4 Pedidos web en el POS | Contador, Panel, `pedidos-web.html`, estados, pago, guia, cliente real, "Crear venta en POS" (+ ST-31 pantalla de configuracion de la tienda, propuesta) | Pendiente (siguiente) |
+| T4 Pedidos web en el POS | Aviso al entrar, contador en el menu, tarjeta en el Panel, `pedidos-web.html`, WhatsApp y cierre del pedido (venta registrada o no se concreto) | Hecho 2026-11-08 (`1bddcb5`) |
+| ST-31 Configuracion de la tienda en el POS | Pantalla para editar tarifas, llave y link sin SQL (propuesta; requiere funciones que validen administrador) | Pendiente (sin aprobar) |
 | T5 Alcance y rendimiento | Busqueda por SKU y sin tildes, SEO/Open Graph, consultas mas livianas, Tailwind compilado, service worker, iconos PNG | Pendiente |
 | T6 Deuda tecnica | Escape de HTML, codigo duplicado, `01-schema.sql` alineado con politicas, ST-30, RA-04 | Pendiente |
 
@@ -521,3 +522,4 @@ Módulo de aprendizaje con cursos, lecciones y progreso de estudiantes.
 |---|---|---|
 | 2026-05-23 | 1.0 | Versión inicial del roadmap con 9 fases POS + 3 fases Store + Academy reservada. |
 | 2026-11-08 | 1.1 | Seccion "Store — Estado real y plan de mejora" con las fases T1 a T6 de la tienda. |
+| 2026-11-08 | 1.2 | T4 (pedidos web en el POS) hecha; ST-31 queda como propuesta aparte. |

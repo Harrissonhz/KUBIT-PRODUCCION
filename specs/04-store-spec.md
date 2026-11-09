@@ -460,7 +460,7 @@ PENDIENTE → PAGADO → CONFIRMADO → ENVIADO → ENTREGADO
 
 ---
 
-### 2.6 Tablas, columnas y funciones agregadas en T2 y T3b (vigente)
+### 2.6 Tablas, columnas y funciones agregadas en T2, T3b y T4 (vigente)
 
 | Objeto | Script | Descripción |
 |---|---|---|
@@ -472,6 +472,8 @@ PENDIENTE → PAGADO → CONFIRMADO → ENVIADO → ENTREGADO
 | `st_destinos_envio (id, zona FK, departamento, ciudad nullable, activo)` | 17 | Departamento/ciudad → zona. `ciudad` vacía = todo el departamento. Índice único por departamento + ciudad. |
 | Funciones públicas (`anon`, `authenticated`) | 15 y 17 | `st_crear_pedido(...)`, `st_cotizar_envio(p_departamento, p_ciudad)`, `st_config_tienda()`. Contratos en `11-api-contracts.md` §9. |
 | Funciones internas (sin `EXECUTE` para `anon`/`authenticated`) | 17 | `st_cfg(clave)`, `st_zona_envio(dep, ciudad)`, `st_normalizar_texto(t)`. |
+| `st_pedidos.gestionado_at` (`timestamptz`), `gestionado_por` (FK `pos_usuarios`), `nota_gestion` (`text`) | `18-pos-pedidos-web.sql` | Cierre del pedido desde el POS (T4). Índice `idx_st_pedidos_estado_created (estado, created_at desc)`. |
+| Funciones del POS (solo `authenticated`) | 18 | `pos_pedidos_web_contar()`, `pos_pedidos_web_listar(p_vista)`, `pos_pedido_web_detalle(p_pedido_id)`, `pos_pedido_web_cerrar(p_pedido_id, p_resultado, p_numero_venta, p_nota)`; internas `pos_usuario_sesion()` y `pos_pedido_web_json()`. Contratos en `11-api-contracts.md` §10. |
 
 **Seguridad:** las tres tablas de configuración tienen RLS activo y `revoke all` para `anon` y `authenticated`; solo las leen el SQL Editor y las funciones `security definer`. El POS no las ve.
 
@@ -597,6 +599,8 @@ Los datos de pago aparecen **solo después** de crear el pedido. Si el pedido ti
 
 ### 3.5 Gestión de Pedidos (Admin)
 
+> **Vigente desde T4 (2026-11-08):** la gestión real es por **WhatsApp** y el pedido solo pasa de `PENDIENTE` a `CONFIRMADO` (venta registrada a mano en el POS) o `CANCELADO` (no se concretó), cerrándolo en `pedidos-web.html` del POS (§3.11). Los demás estados de esta lista, `st_envios` y `st_pagos_online` no se usan.
+
 1. El administrador puede cambiar el estado del pedido manualmente
 2. Al pasar a `ENVIADO`: se requiere `numero_guia` y `transportadora` en `st_envios`
 3. Al pasar a `ENTREGADO`: se registra `fecha_entrega`
@@ -645,11 +649,19 @@ Los datos de pago aparecen **solo después** de crear el pedido. Si el pedido ti
 - Configuración en `st_configuracion` y cambios por SQL: `update public.st_configuracion set valor = '...', updated_at = now() where clave = '...';`
 - Si se cambian `envio_gratis_desde` o `pedido_minimo`, actualizar también `terminos-condiciones.html` y `preguntas-frecuentes.html`, que tienen los montos escritos.
 
+### 3.11 Gestión del pedido en el POS (vigente desde T4)
+- **Quién y cómo:** el POS avisa de los pedidos `PENDIENTE` (aviso emergente una vez por inicio de sesión, contador "Pedidos web (N)" en el menú y tarjeta en el Panel) y los muestra en `pedidos-web.html` con los datos para escribirle al cliente por WhatsApp. Detalle en `03-pos-spec.md` §14.
+- **Datos que llegan de la tienda:** número, fecha y hora, nombre, celular (siempre), correo (solo si lo escribió; es opcional), dirección, ciudad, departamento, medio de pago (`medio_pago_web`), productos con SKU, cantidad y precio, subtotal, envío, total y el aviso `Stock insuficiente` si aplica. No hay cédula.
+- **Lectura segura:** el POS no lee `st_pedidos`, `st_pedidos_detalle` ni `st_direcciones` directo; usa las funciones `pos_pedido*_web_*` (§2.6, `11-api-contracts.md` §10), que validan al usuario del POS.
+- **Cierre del pedido:** resultado obligatorio. "Venta registrada" → `CONFIRMADO` (número de venta opcional: si se escribe, se valida contra `pos_ventas` y se guarda en `venta_id`); "No se concretó" → `CANCELADO`. Sin motivo; nota opcional. Solo se cierran pedidos `PENDIENTE`.
+- **Inventario y ventas:** el pedido web y su cierre **no mueven inventario, no crean ventas ni clientes** (D2). La venta se registra a mano en Ventas con el canal Web y el cliente creado en Clientes (o `222222222222`).
+- **Fuera de alcance (descartado por decisión):** estados `PAGADO`, `ENVIADO`, `ENTREGADO`, registro de pagos, transportadora y guía, y "Crear venta en POS" automático.
+
 ## 4. Flujos del Sistema
 
 ### 4.1 Flujo de Compra Completo (Cliente)
 
-> **Previsto, no implementado.** El flujo vigente es: catálogo → carrito → checkout (§3.4) → pedido `PENDIENTE` → confirmación por WhatsApp → pago manual (transferencia o Mercado Pago) o contraentrega → venta registrada a mano en el POS.
+> **Previsto, no implementado.** El flujo vigente es: catálogo → carrito → checkout (§3.4) → pedido `PENDIENTE` → confirmación por WhatsApp → pago manual (transferencia o Mercado Pago) o contraentrega → el POS avisa del pedido → se gestiona por WhatsApp → venta registrada a mano en el POS → el pedido se cierra en `pedidos-web.html` (§3.11).
 
 ```
 Cliente navega catálogo → Agrega productos al carrito →
@@ -736,6 +748,8 @@ where table_schema = 'public' and grantee = 'anon' and table_name in ('st_pedido
 | Store → POS | Ventas online como movimientos de inventario | Al confirmar pago |
 | Store → POS | Nuevos clientes registrados | Inmediato |
 | POS → Store | Actualizaciones de precio, descuentos | Tiempo real |
+
+> **Vigente (T4, D2):** la tienda no escribe movimientos de inventario ni ventas en el POS. El POS lee los pedidos web con las funciones `pos_pedido*_web_*` y la venta se registra a mano. Las filas "Store → POS" de la tabla anterior describen el alcance previsto, no el implementado.
 
 ### 6.2 Pasarela de Pagos
 - **Endpoint de confirmación (webhook):** Recibe la respuesta de la pasarela y actualiza `st_pagos_online.estado`

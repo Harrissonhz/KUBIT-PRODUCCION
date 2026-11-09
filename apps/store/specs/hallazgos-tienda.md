@@ -1,6 +1,6 @@
 # hallazgos-tienda.md — Hallazgos y plan de mejora de la Tienda (apps/store)
 
-**Versión:** v5 · **Fecha:** 2026-11-08 · **Responsable:** Harrisson Zapata
+**Versión:** v6 · **Fecha:** 2026-11-08 · **Responsable:** Harrisson Zapata
 **Alcance:** código de `apps/store` vigente en producción (`outletshop`), políticas RLS reales de producción y decisiones de negocio.
 **Base de datos:** una sola base Supabase por ambiente; prefijos `pos_` (POS), `st_` (Tienda) y `wms_` (WMS). QA = `gbjtdjbopwgbknklwldq`, producción = `gxqcybboiskwznxdioun`.
 
@@ -18,7 +18,7 @@
 |---|---|
 | D1 | Rol de la tienda: checkout propio **y** apoyo por WhatsApp. |
 | D2 | El pedido web **no mueve inventario**. La venta se registra manualmente en el POS, que controla stock y movimientos. |
-| D3 | Aviso en el POS en tres piezas: contador en el menú lateral, tarjeta en el Panel y página `pedidos-web.html`. Sin pop-up bloqueante. |
+| D3 | Aviso en el POS en tres piezas: contador en el menú lateral, tarjeta en el Panel y página `pedidos-web.html`. Sin pop-up bloqueante. **Ajustada por D29-D30 (T4): hay aviso emergente, una sola vez por sesión.** |
 | D4 | Medios de pago: **transferencia con llave**, **link de pago de Mercado Pago** (creado a mano) y **contraentrega**. Sin APIs ni pasarelas integradas. **PayPal descartado.** |
 | D5 | El pago se confirma a mano contra el banco o Mercado Pago, nunca solo con una captura. En el POS se registra medio, monto, fecha y referencia. |
 | D6 | Contraentrega en todo el país, con confirmación obligatoria por WhatsApp antes de despachar. |
@@ -44,6 +44,13 @@
 | D26 | (2026-11-08) Envío por **zonas** (`st_tarifas_envio`) con mapeo departamento/ciudad (`st_destinos_envio`); regla ciudad > departamento > zona por defecto (`nacional`). Contraentrega usa la misma tarifa, sin recargo (la comisión de recaudo la asume el negocio). El checkout muestra los días estimados de entrega. |
 | D27 | (2026-11-08) **Pedido mínimo $15.000** en productos, sin envío: lo valida `st_crear_pedido` y el checkout lo avisa. Envío gratis desde $80.000 en productos, sin envío. |
 | D28 | (2026-11-08) Si el pedido tiene "Stock insuficiente" (RA-05), la confirmación **no muestra instrucciones de pago**: "Te confirmaremos disponibilidad por WhatsApp antes del pago". |
+| D29 | (2026-11-08) T4 se reformula: la gestión del pedido web es por **WhatsApp**; el POS solo **avisa y muestra** los datos. La venta se registra a mano en Ventas con canal **Web** (cliente real creado en Clientes, o `222222222222`) y después se **cierra el pedido** en el POS. Se descartan los estados intermedios, el registro de pagos y guías y "Crear venta en POS". Reduce el alcance de D3 y D5 en el POS. |
+| D30 | (2026-11-08) Aviso al entrar al POS: aviso emergente **una vez por inicio de sesión** + contador fijo en el menú ("Pedidos web (N)") + tarjeta en el Panel. Implementado en un archivo independiente y de solo lectura (`pedidos-web-aviso.js`); si falla, el POS sigue igual. |
+| D31 | (2026-11-08) Permisos: todo usuario activo del POS con sesión puede ver y cerrar pedidos web (hoy solo el administrador); no hay permiso propio. |
+| D32 | (2026-11-08) Cierre del pedido: resultado **obligatorio** — "Venta registrada" (`CONFIRMADO`) o "No se concretó" (`CANCELADO`), **sin motivo**; número de venta **opcional** (se valida contra `pos_ventas` y se enlaza en `venta_id`); nota **opcional** (500 caracteres). Solo se cierran pedidos `PENDIENTE`. |
+| D33 | (2026-11-08) El POS no lee las tablas `st_*` directo: usa funciones `security definer` (`pos_pedido*_web_*`) que validan al usuario y devuelven el pedido con los datos del comprador (por sus políticas, el POS no puede leer `st_direcciones`). |
+| D34 | (2026-11-08) Mensaje inicial de WhatsApp: "Hola {nombre}, te escribimos de OutletShop por tu pedido KBT-… por $X". El correo del comprador solo se muestra si lo escribió (es opcional). |
+| D35 | (2026-11-08) Cada pedido es una tarjeta colapsable **cerrada por defecto**, en "Por gestionar" y en "Gestionados (30 días)"; el encabezado muestra número, cliente, total, medio de pago y la etiqueta "Stock insuficiente". Los textos de cantidad, precio y total tienen color explícito en modo claro y oscuro. |
 
 **Fuera de alcance por ahora:** analítica (GA, Pixel, Vercel Analytics), reputación de Mercado Libre en la tienda, cédula en el checkout, pasarelas con API.
 
@@ -72,7 +79,7 @@
 | ST-12 | WhatsApp de la ficha abre un chat vacío | P1 | Alto | S | T3a | Hecho 2026-11-08 |
 | ST-13 | Paginación con barajado repite y oculta productos | P1 | Medio | S | T3a | Hecho 2026-11-08 |
 | ST-14 | Caracteres dañados en textos visibles | — | — | — | — | Cerrado (falso positivo) |
-| ST-15 | El POS no avisa ni permite gestionar pedidos web | P1 | Alto | L | T4 | Pendiente |
+| ST-15 | El POS no avisa ni permite gestionar pedidos web | P1 | Alto | L | T4 | Hecho 2026-11-08 |
 | ST-16 | Búsqueda limitada (sin SKU, sensible a tildes) | P2 | Medio | M | T5 | Pendiente |
 | ST-17 | Sin vista previa al compartir (SEO / Open Graph) | P2 | Medio | M | T5 | Pendiente |
 | ST-18 | Cada página descarga el catálogo completo | P2 | Bajo | M | T5 | Pendiente |
@@ -88,7 +95,7 @@
 | ST-28 | La grilla no indica que las variantes tienen precios distintos | P1 | Medio | S | T1 | Hecho 2026-10-28 |
 | ST-29 | El ambiente de pruebas de la tienda apuntaba a la base de producción | P0 | — | S | T2 | Hecho 2026-11-03 |
 | ST-30 | Políticas de `st_envios` y `st_pagos_online` dependen de `st_pedidos` | P3 | Bajo | S | T3/T4 | Pendiente (revisar al usarlas) |
-| ST-31 | La configuración de la tienda (tarifas, envío gratis, mínimo, llave, link) solo se cambia por SQL | P2 | Bajo | M | T4 (propuesto) | Pendiente |
+| ST-31 | La configuración de la tienda (tarifas, envío gratis, mínimo, llave, link) solo se cambia por SQL | P2 | Bajo | M | Fase propia (propuesto) | Pendiente |
 | RA-01 | Lectura pública de `pos_clientes` (Ley 1581) | — | — | — | — | Aceptado |
 | RA-02 | Reseñas y calificación ficticias en la portada | — | — | — | — | Aceptado |
 | RA-03 | Envío gratis desde $80.000 también en zonas remotas | — | — | — | — | Aceptado |
@@ -171,12 +178,18 @@
 ### ST-14 · Caracteres dañados — Cerrado (falso positivo, 2026-10-28)
 - Las tildes se ven bien en producción ("Presentación", "Cojín", "Navideña"). El daño venía del visor de OneDrive usado en el levantamiento, no de los archivos.
 
-### ST-15 · El POS no gestiona pedidos web — P1 · Ventas: Alto
-- **Mitigación (D3, D5):**
-  - Contador "Pedidos web (N)" en el menú lateral del POS.
-  - Tarjeta "Pedidos web por atender" en el Panel.
-  - Página `apps/pos/pedidos-web.html`: lista y detalle (datos del comprador desde `st_direcciones`, aviso de stock desde `notas`); estados `PENDIENTE → CONFIRMADO → PAGADO → ENVIADO → ENTREGADO` o `CANCELADO`; registro de pago (medio, monto, fecha, referencia); transportadora y guía; botón "Contactar por WhatsApp"; asignar el cliente real si pide factura (D16); botón "Crear venta en POS" que abre la venta con los productos cargados para registrarla manualmente (D2).
-- **Archivos:** POS (`apps/pos`): nueva página, menú, Panel, `database.js`, `service-worker.js`; posible script SQL para columnas de pago y envío en `st_pedidos`.
+### ST-15 · El POS no gestiona pedidos web — P1 · Ventas: Alto · ✅ Hecho (T4)
+- **Evidencia (antes):** el POS no tenía forma de enterarse de un pedido web ni de ver los datos del comprador. Las políticas de producción dejan al rol `authenticated` leer y actualizar `st_pedidos`, pero en `st_direcciones` solo ve las filas con `cliente_id = auth.uid()`; como todos los pedidos web van a nombre de CONSUMIDOR Ecommerce (D16), el POS no podía leer nombre, celular ni dirección del comprador.
+- **Reformulación (D29–D35):** la gestión es por WhatsApp; el POS avisa, muestra los datos y permite cerrar el pedido. Se descartan los estados intermedios, el registro de pagos y guías y "Crear venta en POS" (la venta, el cliente y el inventario siguen como hoy, a mano en el POS).
+- **Solución aplicada:**
+  - `specs/18-pos-pedidos-web.sql` (solo agrega): columnas `st_pedidos.gestionado_at`, `gestionado_por` y `nota_gestion`; funciones `pos_pedidos_web_contar()`, `pos_pedidos_web_listar(p_vista)`, `pos_pedido_web_detalle(p_pedido_id)` y `pos_pedido_web_cerrar(p_pedido_id, p_resultado, p_numero_venta, p_nota)` (solo `authenticated`; exigen un usuario activo de `pos_usuarios` con sesión de Supabase Auth) y las internas `pos_usuario_sesion()` y `pos_pedido_web_json()`. No cambia políticas ni toca inventario, ventas, clientes ni la tienda.
+  - **Aviso (D30):** `pedidos-web-aviso.js` agrega "Pedidos web (N)" debajo de Dashboard, la tarjeta "Pedidos web por gestionar" en el Panel y un aviso emergente una vez por inicio de sesión. Archivo independiente; lo carga `database.js` desde `cargarLinkTienda()`.
+  - **Página (D34, D35):** `pedidos-web.html` con pestañas "Por gestionar" y "Gestionados (30 días)", tarjetas colapsables cerradas por defecto, "Escribir por WhatsApp", "Copiar datos del cliente" y "Cerrar pedido".
+  - **Cierre (D32):** "Venta registrada" (`CONFIRMADO`, número de venta opcional) o "No se concretó" (`CANCELADO`), sin motivo, con nota opcional.
+- **Evidencia QA (2026-11-08):** script 18 verificado (3 columnas nuevas; las 4 funciones públicas con `authenticated` y sin `anon`; `pos_pedidos_web_contar()` desde el SQL Editor falla con `[POS_SESION]`). Con el usuario `admin_pruebas`: aviso al entrar, contador y tarjeta del Panel coincidieron con la base; `KBT-202611-000001` cerrado como "Venta registrada" con número de venta y nota (`CONFIRMADO`, `venta_id` lleno) y `KBT-202611-000002` como "No se concretó" con nota (`CANCELADO`); conteo final 8 `PENDIENTE`, 1 `CONFIRMADO` y 1 `CANCELADO`. Ajustes pedidos en la revisión visual: color de cantidad, precio y total en modo claro y oscuro y tarjetas colapsables cerradas por defecto.
+- **Producción (2026-11-08):** script 18 ejecutado y verificado, frontend publicado (`1bddcb5`) y prueba de humo con un pedido real de prueba (aviso, menú, Panel, cierre "No se concretó"); el pedido se borró (OP-04).
+- **Archivos:** `specs/18-pos-pedidos-web.sql`; POS (`apps/pos`): `pedidos-web.html`, `js/paginas/pedidos-web.js`, `js/compartido/pedidos-web-aviso.js`, `js/compartido/database.js` (solo se agregó `DB.pedidosWeb` y la carga del aviso), `service-worker.js` (caché `kubit-pos-20261108-01`); `tests/pos/pedidos-web.test.mjs` y `tests/pos/pedidos-web-ui.test.mjs`.
+- **Hallazgo operativo:** en Supabase Auth de producción solo existe `outletshoptiendavirtual@gmail.com` (los usuarios `admin` y `admin_497a2c95` de `pos_usuarios` no pueden iniciar sesión); en QA, solo `admin_pruebas`. Ver AGENTS.md §10.5.
 
 ### ST-16 · Búsqueda limitada — P2 · Ventas: Medio
 - **Evidencia:** `js/api/productos.js` busca solo en nombre y descripción corta; no busca por SKU; "bebe" no encuentra "bebé".
@@ -248,7 +261,7 @@
   - El script 17 revocó el acceso a esas tablas para `anon` **y** `authenticated`: una pantalla en el POS necesita funciones `security definer` que verifiquen que el usuario es administrador (no basta con abrir las tablas).
   - `terminos-condiciones.html` y `preguntas-frecuentes.html` tienen escritos "$15.000" y "$80.000": si los valores se editan desde una pantalla, esos textos deben leerse de la configuración o actualizarse a mano.
 - **Mitigación mientras tanto:** `UPDATE` documentados en `specs/11-api-contracts.md` §9.4 y al pie de `specs/17-store-checkout-coherente.sql`.
-- **Fase:** propuesta para T4 (POS) o fase propia; sin aprobar.
+- **Fase:** propuesta como fase propia (ya no va en T4, que se redujo a avisar y gestionar por WhatsApp); sin aprobar.
 
 ## 6. Riesgos aceptados
 
@@ -268,7 +281,7 @@
 | **T2 Pedido seguro** | ST-04, ST-05, ST-07, ST-08, ST-29 (ST-06 → RA-05) | SQL + frontend | T1 | ✅ Hecho 2026-11-03 (`b3bc908`) |
 | **T3a WhatsApp y paginación** | ST-12, ST-13 | Solo frontend | T2 | ✅ Hecho 2026-11-08 (`92dc65b`, `272bc1d`) |
 | **T3b Checkout coherente** | ST-09, ST-10, ST-11 | SQL (`17`) + frontend | T3a | ✅ Hecho 2026-11-08 (`679251a`) |
-| **T4 Pedidos web en el POS** | ST-15 (+ ST-31 propuesto) | POS + SQL menor | T3b | Pendiente (siguiente) |
+| **T4 Pedidos web en el POS** | ST-15 | POS + SQL (`18`) | T3b | ✅ Hecho 2026-11-08 (`1bddcb5`) |
 | **T5 Alcance y rendimiento** | ST-16 a ST-21 | Frontend + Vercel | Ninguna | Pendiente |
 | **T6 Deuda técnica** | ST-22, ST-23, ST-24, ST-30, RA-04 | Frontend + SQL + documentación | Puede ir junto con otras fases | Pendiente |
 
@@ -284,6 +297,14 @@
 4. Verificación con `pg_policies` e `information_schema.role_table_grants` (0 filas `anon`), nueva prueba de humo en tienda, POS y WMS.
 5. Borrado de los pedidos de prueba.
 
+### Orden de despliegue de T4 (script que solo agrega)
+
+1. `specs/18-pos-pedidos-web.sql` en QA y verificación (3 columnas; funciones con `authenticated` y sin `anon`; `pos_pedidos_web_contar()` sin sesión falla con `[POS_SESION]`).
+2. Frontend en `KUBIT-Pruebas` con `node ~/Downloads/store-t4/tools/actualizar-sw-pos-t4.mjs` para el service worker del POS; tests y pruebas manuales con un usuario que exista en Supabase Auth de QA.
+3. Script 18 en producción y las mismas verificaciones. No hay riesgo de orden: el script no cierra accesos y la tienda no lo usa.
+4. Commit por archivo en producción (`git add` con la lista, nunca `git add .`) y prueba de humo: crear un pedido en la tienda, verlo en el POS, cerrarlo "No se concretó", hacer una venta y abrir el WMS.
+5. Borrar el pedido de prueba (OP-04).
+
 ### Pruebas automatizadas
 
 - Carpeta `tests/store/` en la raíz del repo. Archivos `.mjs` (módulo ES; el `package.json` del repo usa `"type": "module"`, y Vitest solo toma `tests/**/*.test.js`).
@@ -294,7 +315,8 @@
 - `tests/store/ambiente.test.mjs`: 4 casos de ST-29.
 - `tests/store/store-t3a.test.mjs`: 15 casos de T3a (mensaje y logo de WhatsApp, paginación por visita).
 - `tests/store/store-t3b.test.mjs`: 37 casos de T3b (configuración, envío por zona y gratis, días, pedido mínimo, 3 medios de pago, confirmación, stock insuficiente, carrito, textos legales, caché y reglas del script 17).
-- Ejecutar desde la raíz: `node --test tests/store/*.test.mjs` (111/111) y `npm test` (Vitest, 119/119).
+- `tests/pos/pedidos-web.test.mjs` (23 casos) y `tests/pos/pedidos-web-ui.test.mjs` (6): T4, en el POS (`DB.pedidosWeb`, aviso una vez por sesión, menú, tarjeta del Panel, página, tarjetas colapsables, colores y reglas del script 18).
+- Ejecutar desde la raíz: `node --test tests/store/*.test.mjs` (111/111), `node --test tests/pos/*.test.mjs` (29/29) y `npm test` (Vitest, 119/119).
 - Cada fase agrega su propio archivo de test y los anteriores deben seguir pasando.
 
 ### Criterios de aceptación por fase
@@ -303,7 +325,7 @@
 - **T2 (✅ 2026-11-03):** el pedido se crea con una sola llamada a `st_crear_pedido`; un precio manipulado en `localStorage` no cambia el precio guardado; si la cantidad supera el stock, el pedido se crea y queda el aviso en `notas` (RA-05); `anon` ya no puede leer ni insertar en `st_pedidos`, `st_pedidos_detalle` ni `st_direcciones` (0 filas en `pg_policies` y en permisos); números `KBT-AAAAMM-NNNNNN` únicos por secuencia; todos los pedidos quedan a nombre de CONSUMIDOR Ecommerce y los datos del comprador en `st_direcciones`; celular obligatorio y correo opcional; POS y WMS sin cambios de comportamiento; tests 59/59 y 119/119.
 - **T3a (✅ 2026-11-08):** "Preguntar por WhatsApp" con producto, opción, SKU, precio y enlace, y logo completo; la paginación no repite productos en una visita; tests 74/74.
 - **T3b (✅ 2026-11-08):** el envío cambia según departamento/ciudad (zona) y se muestran los días; desde $80.000 es $0; bajo $15.000 no se crea el pedido; carrito, checkout y pedido muestran el mismo total; solo aparecen los 3 medios de pago reales; la confirmación muestra instrucciones y el botón "Confirmar por WhatsApp"; la ficha tiene "Preguntar por WhatsApp" con el producto; la paginación no repite productos.
-- **T4:** un pedido nuevo aparece en el contador del menú y en el Panel; se puede pasar por todos los estados registrando pago y guía; se puede asignar un cliente real; "Crear venta en POS" abre la venta con los productos; el pedido web no mueve inventario.
+- **T4 (✅ 2026-11-08):** un pedido nuevo aparece en el aviso al entrar (una vez por sesión), en el contador del menú y en el Panel; la página muestra nombre, celular, correo (si existe), dirección, productos y totales, con tarjetas cerradas por defecto; "Escribir por WhatsApp" abre el chat con el mensaje acordado; cerrar como "Venta registrada" (con o sin número de venta) pasa a `CONFIRMADO` y como "No se concretó" a `CANCELADO`; el número de venta inexistente no cierra el pedido; el pedido web no mueve inventario; POS y WMS sin cambios de comportamiento; tests 29/29, 111/111 y 119/119.
 - **T5:** al compartir un enlace se ve imagen, nombre y precio; la búsqueda encuentra por SKU y sin tildes; mejora la carga en celular.
 - **T6:** sin `innerHTML` con datos sin escapar; `01-schema.sql` (o su script complementario) coincide con `pg_policies` de producción; decisión final sobre RA-04.
 
@@ -314,6 +336,7 @@
 | OP-01 | Borrar los 5 pedidos de prueba de producción (KBT-202610-8977, -0409, -9276, -1848, -7621) y su detalle. También se borró `KBT-202610-8889`, creado por la prueba manual de T1 contra producción (ST-29). | Hecho 2026-10-28 |
 | OP-02 | Borrar los pedidos de prueba de la prueba de humo de T2 en producción (`KBT-202611-000001` y `-000002`) y su detalle. El consecutivo sigue desde el siguiente número. | Hecho 2026-11-03 |
 | OP-03 | Borrar de producción los pedidos de la prueba de humo de T3b (2026-11-08) y su detalle, en un solo bloque `begin; ... commit;`. | Hecho 2026-11-08 |
+| OP-04 | Borrar de producción el pedido de la prueba de humo de T4 (2026-11-08) y su detalle, en un solo bloque `begin; ... commit;`. Los pedidos de prueba de QA (`KBT-202611-000001` a `-000010`) no se borran. | Hecho 2026-11-08 |
 
 ## 9. Historial
 
@@ -324,3 +347,4 @@
 | v3 | 2026-11-03 | T2 publicada (`b3bc908`): ST-04, 05, 07, 08 y 29 hechos; ST-06 pasa a RA-05; nuevos RA-04, ST-29 y ST-30; decisiones D16–D20 (cliente CONSUMIDOR Ecommerce, sin cédula, sin validación de stock, precio del POS, medios de pago temporales); formato `KBT-AAAAMM-NNNNNN`; orden de despliegue 15 → frontend → 16; tests 59/59; OP-02. |
 | v4 | 2026-11-08 | T3a publicada (`92dc65b`, `272bc1d`): ST-12 y ST-13 hechos. T3b en QA con `specs/17-store-checkout-coherente.sql`; decisiones D21–D28; tests 111/111. |
 | v5 | 2026-11-08 | T3b publicada (`679251a`): ST-09, ST-10 y ST-11 hechos; tarifas reales en producción; RA-03 ratificado con las tarifas reales; nuevo ST-31 (configuración solo por SQL); OP-03. |
+| v6 | 2026-11-08 | T4 publicada (`1bddcb5`): ST-15 hecho (aviso, página `pedidos-web.html` y cierre del pedido con script `18`); decisiones D29–D35; ST-31 pasa a fase propia; OP-04; tests POS 29/29. |

@@ -111,11 +111,30 @@ create extension if not exists unaccent;
 
 
 -- ============================================================
+-- PASO 9: POS T4 — pedidos web en el POS
+-- Archivo: 18-pos-pedidos-web.sql
+-- Contenido: columnas st_pedidos.gestionado_at, gestionado_por y
+--            nota_gestion; funciones pos_pedidos_web_contar,
+--            pos_pedidos_web_listar, pos_pedido_web_detalle,
+--            pos_pedido_web_cerrar y las internas pos_usuario_sesion
+--            y pos_pedido_web_json (solo para usuarios del POS con sesion)
+-- Requisito: PASO 8 (st_pedidos.medio_pago_web) y usuarios del POS
+--            presentes en Supabase Auth con el mismo id
+-- Solo agrega: no cierra accesos ni cambia politicas. Primero en QA.
+-- ============================================================
+-- >> Ejecutar 18-pos-pedidos-web.sql a continuacion
+--    Verificacion: select public.pos_pedidos_web_contar();
+--                  (desde el SQL Editor debe FALLAR con [POS_SESION]:
+--                   no hay sesion de un usuario del POS)
+
+
+-- ============================================================
 -- FIN: Base de datos 100% operativa
 -- Siguiente paso: Poblar datos desde plan de migracion
 --   ArchivosInformativos/MigracionDB/01-plan-migracion.md
 -- NOTA TEMPLATE: Al clonar Kubit para un nuevo cliente, copiar
 -- 01-schema.sql + 02-seed-permisos.sql + 03-seed-store-grants.sql
--- + 04-rpcs-ventas.sql + 13 + 15 + 16 + 17 (en ese orden).
+-- + 04-rpcs-ventas.sql + 13 + 15 + 16 + 17 + 18 (en ese orden).
 -- Olvidar 04 rompe ventas. Olvidar 15 o 17 rompe el checkout de la tienda.
+-- Olvidar 18 deja sin datos el aviso y la pagina de pedidos web del POS.
 -- ============================================================

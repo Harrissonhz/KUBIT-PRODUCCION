@@ -1,6 +1,8 @@
 # Especificación del Módulo POS - Kubit
 
-> **Ultima actualizacion:** 2026-10-21 (Fases 42 a 44): subsecciones 3.3.3, 3.3.4, 9.4 y 12 (Inventario con la regla unica de stock, menu lateral y enlace al WMS) y modelo de datos (`store_url` y `wms_url` en `pos_configuracion_empresa`).
+> **Ultima actualizacion:** 2026-11-08 (T4): nueva seccion 14 (Pedidos web de la Tienda en el POS), 6.1 corregida (el pedido web no mueve inventario; la venta se registra a mano) y 12.4 (enlace "Pedidos web" en el menu); el Glosario pasa a la seccion 15.
+>
+> Anterior: 2026-10-21 (Fases 42 a 44): subsecciones 3.3.3, 3.3.4, 9.4 y 12 (Inventario con la regla unica de stock, menu lateral y enlace al WMS) y modelo de datos (`store_url` y `wms_url` en `pos_configuracion_empresa`).
 >
 > Anterior: 2026-10-18 (Fases 30 a 41): subsecciones 3.1.4, 3.1.5, 3.4.5, 3.6.2 y 3.7.3; correcciones en 3.1.1, 3.3.2 a 3.3.4, 4.1.1, 9.4 y 12.
 
@@ -945,9 +947,9 @@ Los permisos se organizan por módulo (`modulo`) con clave única (`clave`):
 ### 6.1 Módulo Store (Tienda Virtual)
 - Los productos creados en POS se sincronizan automáticamente con la tienda virtual
 - El stock se actualiza en tiempo real (o cada 5 minutos vía polling)
-- Las ventas online se registran como ventas en POS con `canal_id = web`
+- Las ventas online se registran como ventas en POS con `canal_id = web` (vigente desde T4: las registra a mano el usuario en Ventas, despues de gestionar el pedido por WhatsApp; ver 14)
 - Los pedidos de la tienda (`st_pedidos`) se vinculan a su venta POS mediante `st_pedidos.venta_id`
-- La consolidación de inventario es automática: al confirmar un pedido web, se descuenta stock vía `pos_movimientos_inventario`
+- ~~La consolidación de inventario es automática: al confirmar un pedido web, se descuenta stock vía `pos_movimientos_inventario`~~ **(OBSOLETO, T4 / D2):** el pedido web **no mueve inventario**. El stock solo cambia cuando la venta se registra a mano en el POS (ver 14).
 
 ### 6.2 Supabase/PostgreSQL
 - Todas las operaciones CRUD se realizan vía API de Supabase
@@ -1409,6 +1411,7 @@ El bloque `cargarLinkTienda()` al final de `database.js` busca `#link-tienda-vir
 
 ### 12.4 Sidebar POS — Orden de Grupos
 1. **Dashboard** (link directo, no colapsable) → `panel.html`
+   - Debajo de Dashboard, el enlace **Pedidos web (N)** → `pedidos-web.html` (T4, ver 14.4). Lo agrega `pedidos-web-aviso.js` por JavaScript: no esta en el HTML de las paginas.
 2. **Ventas** (colapsable) → Registrar Venta, Mostrador, Historial, Facturacion
 3. **Stock** (colapsable) → Productos, Categorias, Stock
 4. **Compras** (colapsable) → Ordenes, Proveedores
@@ -1437,7 +1440,77 @@ Los puntos 9 a 11 forman el pie fijo del menu (ver 12.6).
 
 ---
 
-## 14. Glosario
+## 14. Pedidos Web de la Tienda en el POS (T4, 2026-11-08)
+
+### 14.1 Propósito y flujo
+Los pedidos que llegan de la Tienda Virtual (`st_pedidos`, estado `PENDIENTE`) se **gestionan por WhatsApp**. El POS solo **avisa** que hay pedidos, **muestra los datos** necesarios para escribirle al cliente y permite **cerrar** el pedido cuando ya se gestionó.
+```
+Cliente hace el pedido en la tienda (celular obligatorio) →
+  → El usuario entra al POS (a registrar ventas de Mercado Libre, por ejemplo) y ve el aviso →
+  → Abre "Pedidos web", ve los datos y escribe al cliente por WhatsApp →
+  → Verifica pago y disponibilidad y acuerda el envio →
+  → Si se concreta: registra la venta en Ventas (canal Web; cliente creado en Clientes o 222222222222) →
+  → Cierra el pedido en "Pedidos web" (Venta registrada o No se concreto)
+```
+
+### 14.2 Reglas de negocio
+- El pedido web y su cierre **no mueven inventario, no crean ventas y no crean clientes**. Todo eso se hace a mano en Ventas y Clientes (D2).
+- Cerrar un pedido exige elegir un resultado: **Venta registrada** (`CONFIRMADO`) o **No se concreto** (`CANCELADO`). No se pide motivo. El **numero de venta es opcional** y solo aplica a "Venta registrada": si se escribe debe existir en `pos_ventas`, no estar anulada ni enlazada a otro pedido, y se guarda en `st_pedidos.venta_id`. La **nota** es opcional (500 caracteres).
+- Solo se pueden cerrar pedidos `PENDIENTE`. Al cerrar quedan `gestionado_at`, `gestionado_por` (usuario del POS) y `nota_gestion`.
+- Los pedidos cerrados salen de "Por gestionar" y quedan en "Gestionados" durante 30 dias.
+- Puede verlos y cerrarlos **todo usuario activo del POS con sesion** (hoy solo el administrador); no hay permiso propio.
+- Datos del comprador: nombre, celular (siempre), correo (solo si lo escribio: es opcional en el checkout), direccion, ciudad y departamento. No hay cedula.
+
+### 14.3 Datos: funciones de base (`specs/18-pos-pedidos-web.sql`)
+El POS **no lee las tablas `st_*` directo**: las politicas de `st_direcciones` solo dejan al usuario del POS ver las direcciones de su propio `cliente_id`, y todos los pedidos web van a nombre del cliente generico CONSUMIDOR Ecommerce. Por eso usa funciones `security definer` que validan al usuario (`pos_usuario_sesion()`: usuario activo de `pos_usuarios` con el mismo `id` que `auth.users`, respaldo por correo) y devuelven el pedido con los datos del comprador:
+
+| Función | Uso |
+|---|---|
+| `pos_pedidos_web_contar()` | Cuantos pedidos `PENDIENTE` hay (aviso, contador del menu y tarjeta del Panel) |
+| `pos_pedidos_web_listar(p_vista)` | `pendientes` (mas antiguos primero) o `gestionados` (ultimos 30 dias); maximo 200 |
+| `pos_pedido_web_detalle(p_pedido_id)` | Un pedido |
+| `pos_pedido_web_cerrar(p_pedido_id, p_resultado, p_numero_venta, p_nota)` | Cierra el pedido (`venta` o `no_concretado`) |
+
+Contratos completos y errores `[POS_xxx]` en `11-api-contracts.md` §10. En el codigo se usan con `DB.pedidosWeb.contar()`, `listar(vista)`, `detalle(id)` y `cerrar(id, resultado, numeroVenta, nota)`, que devuelven `{ data, error, codigo }`.
+
+### 14.4 Aviso al entrar, menu y Panel
+`js/compartido/pedidos-web-aviso.js` es un archivo **independiente y de solo lectura** que carga `database.js` (`cargarLinkTienda()` → `cargarAvisoPedidosWeb()`, una sola vez por pagina) en todas las paginas con menu. Si falla o no carga, el POS sigue igual: no redirige al login ni muestra errores.
+- **Menu:** enlace "Pedidos web" debajo de Dashboard (`#link-pedidos-web`) con contador rojo (`#badge-pedidos-web`).
+- **Aviso emergente:** "Tienes N pedidos web de la Tienda Virtual por gestionar por WhatsApp", con "Ver pedidos" y "Ahora no" (`#modal-aviso-pedidos-web`). Sale **una vez por inicio de sesion**: se recuerda en `sessionStorage` (`kubit_aviso_pedidos_web` = `loginAt`). No sale en `pedidos-web.html`, `login.html` ni `index.html`.
+- **Panel:** tarjeta "Pedidos web por gestionar" con el numero (`#card-pedidos-web`), solo si hay pendientes.
+- El contador y la tarjeta se leen al abrir cada pagina; en `pedidos-web.html` el contador del menu tambien se actualiza al cargar la lista (por ejemplo, despues de cerrar un pedido).
+
+### 14.5 Página `pedidos-web.html`
+- Estructura de las paginas CRUD del POS (header fijo, menu, toast); no esta en un grupo del menu.
+- Pestañas **Por gestionar** (con contador) y **Gestionados (30 dias)**, boton Actualizar.
+- Cada pedido es una tarjeta colapsable `<details class="grupo-card">`, **cerrada por defecto** en las dos pestañas. El encabezado (siempre visible) muestra numero, fecha y antiguedad, nombre y ciudad del cliente, total, medio de pago y las etiquetas "Stock insuficiente" o el resultado ("Venta registrada" / "No se concreto").
+- Al abrir la tarjeta: cliente (nombre, celular, correo si existe), envio (direccion, ciudad, departamento), productos con SKU, opcion, cantidad, precio, total y **stock de hoy** (en rojo si no alcanza), subtotal, envio, total, aviso de stock (`Stock insuficiente: SKU (pedido N, disponible M)`) y, en los gestionados, resultado, fecha, usuario, numero de venta y nota.
+- Botones: **Escribir por WhatsApp** (`https://wa.me/57<celular>?text=` con "Hola {nombre}, te escribimos de OutletShop por tu pedido KBT-… por $X"; si el celular no es valido, "Celular no valido"), **Copiar datos del cliente** (nombre, celular, correo si existe, direccion, ciudad, pedido) y **Cerrar pedido** (solo `PENDIENTE`).
+- **Cerrar pedido** abre una ventana: opciones "Venta registrada" y "No se concreto", numero de venta (solo con la primera), nota y botones Cancelar / Cerrar pedido (deshabilitado hasta elegir resultado). Si la base rechaza el cierre (por ejemplo, venta inexistente) el mensaje aparece en la ventana y el pedido sigue pendiente.
+- Colores de texto explicitos para modo claro y oscuro en cantidad, precio y total.
+
+### 14.6 Archivos
+| Archivo | Rol |
+|---|---|
+| `specs/18-pos-pedidos-web.sql` | Columnas de gestion y funciones (se ejecuta a mano en Supabase: QA primero) |
+| `apps/pos/pedidos-web.html` | Pagina (copia la estructura de `clientes.html`) |
+| `apps/pos/js/paginas/pedidos-web.js` | Logica de la pagina |
+| `apps/pos/js/compartido/pedidos-web-aviso.js` | Menu, aviso emergente y tarjeta del Panel |
+| `apps/pos/js/compartido/database.js` | Solo agrega `DB.pedidosWeb` y la carga del aviso |
+| `apps/pos/service-worker.js` | Cache `kubit-pos-20261108-01` y los 3 archivos nuevos en ASSETS |
+| `tests/pos/pedidos-web.test.mjs`, `tests/pos/pedidos-web-ui.test.mjs` | 29 casos (`node --test tests/pos/*.test.mjs`) |
+
+### 14.7 Decisiones de diseño (No Reabrir)
+| Decisión | Valor |
+|---|---|
+| Alcance | Avisar, mostrar y cerrar. Sin estados intermedios (`PAGADO`, `ENVIADO`, `ENTREGADO`), sin registro de pagos ni guias, sin "Crear venta en POS" automatico |
+| Aviso | Una vez por inicio de sesion, mas contador fijo en el menu y tarjeta en el Panel; en un archivo aparte para no tocar Ventas ni otros flujos |
+| Datos | Solo por funciones `security definer`; el POS no lee `st_*` directo |
+| Cierre | Resultado obligatorio, sin motivo; numero de venta y nota opcionales |
+| Medicion | El resultado obligatorio permite medir cuantos pedidos web terminan en venta |
+| Usuarios | Deben existir en Supabase Auth con el mismo `id` que en `pos_usuarios`; hoy en produccion solo `outletshoptiendavirtual@gmail.com` (ver AGENTS.md §10.5) |
+
+## 15. Glosario
 
 | Término | Definición |
 |---|---|

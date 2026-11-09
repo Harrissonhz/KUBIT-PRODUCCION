@@ -2,7 +2,7 @@
 
 Este archivo es la **memoria oficial del proyecto** para cualquier IA que trabaje en el ecosistema Kubit. Contiene las reglas, el stack, las decisiones ya tomadas y el estado actual del desarrollo. Leerlo completo antes de cualquier intervención.
 
-**Ultima actualizacion:** 2026-11-08 — se documento el plan de mejora de la Tienda (fases T1, T2, T3a y T3b, ya en produccion), los scripts SQL 15, 16 y 17 y las tablas y funciones nuevas de la tienda (secciones 3.1, 3.2, 5, 7.2, 7.3, 10.4, 11 y 13). **Antes de tocar `apps/store` o cualquier tabla `st_*`, leer la seccion 5.1 y `apps/store/specs/hallazgos-tienda.md`.** Las Fases 42 a 44 del POS se documentaron el 2026-10-21.
+**Ultima actualizacion:** 2026-11-08 — se documento la fase **T4 (pedidos web en el POS, ya en produccion)**: script SQL 18, funciones `pos_pedido*_web_*`, pagina `pedidos-web.html`, aviso al entrar, tests `tests/pos/` (secciones 3.1, 3.2, 5.2, 7.1, 7.2, 7.3, 7.4, 10.5, 11 y 13). **Antes de tocar pedidos web en el POS, leer la seccion 5.2.** Antes (mismo dia): se documento el plan de mejora de la Tienda (fases T1, T2, T3a y T3b, ya en produccion), los scripts SQL 15, 16 y 17 y las tablas y funciones nuevas de la tienda (secciones 3.1, 3.2, 5, 7.2, 7.3, 10.4, 11 y 13). **Antes de tocar `apps/store` o cualquier tabla `st_*`, leer la seccion 5.1 y `apps/store/specs/hallazgos-tienda.md`.** Las Fases 42 a 44 del POS se documentaron el 2026-10-21.
 
 ---
 
@@ -62,6 +62,7 @@ Este archivo es la **memoria oficial del proyecto** para cualquier IA que trabaj
 │   ├── 15-store-pedido-seguro.sql      ← Tienda T2: funcion st_crear_pedido, secuencia de numero de pedido, st_direcciones.email
 │   ├── 16-store-cerrar-acceso-anon.sql ← Tienda T2: quita al rol anon el acceso directo a pedidos, detalle y direcciones
 │   ├── 17-store-checkout-coherente.sql ← Tienda T3b: configuracion, zonas de envio, medio_pago_web, st_crear_pedido v2
+│   ├── 18-pos-pedidos-web.sql          ← POS T4: columnas de gestion en st_pedidos y funciones pos_pedido*_web_* (pedidos web en el POS)
 │   ├── 03-pos-spec.md
 │   ├── 04-store-spec.md
 │   ├── 05-ui-ux-system.md
@@ -76,12 +77,13 @@ Este archivo es la **memoria oficial del proyecto** para cualquier IA que trabaj
 ├── apps/
 │   ├── pos/               ← Código del módulo POS
 │   ├── store/             ← Código del módulo Tienda Virtual
-│   │   ├── specs/hallazgos-tienda.md ← Hallazgos, decisiones (D1-D28), riesgos y plan T1-T6 de la tienda
+│   │   ├── specs/hallazgos-tienda.md ← Hallazgos, decisiones (D1-D35), riesgos y plan T1-T6 de la tienda
 │   │   └── memory/progress.md        ← Estado corto y bitacora de la tienda
 │   ├── wms/               ← Modulo WMS (bodega). Ver apps/wms/AGENTS.md
 │   └── academy/           ← Futuro (post-MVP)
 ├── tests/
 │   ├── (vitest)           ← Tests del POS: *.test.js (npm test)
+│   ├── pos/               ← Tests del POS con node --test (T4): *.test.mjs (node --test tests/pos/*.test.mjs)
 │   └── store/             ← Tests de la tienda: *.test.mjs (node --test tests/store/*.test.mjs)
 │
 ├── .opencode/skills/      ← Skills para OpenCode
@@ -109,8 +111,9 @@ Este archivo es la **memoria oficial del proyecto** para cualquier IA que trabaj
   - `academy_*` → Módulo Academy (futuro)
 - Los módulos comparten tablas base: `pos_productos`, `pos_productos_detalle`, `pos_categorias`, `pos_clientes`, `pos_usuarios`, `pos_roles`, `pos_permisos`, `pos_configuracion_empresa`, `pos_metodos_pago`, `pos_canales_venta`
 - **35 tablas en el esquema base** (`01-schema.sql`: 25 pos_* + 10 st_*) **+ 3 tablas st_* de configuracion de la tienda** (`17-store-checkout-coherente.sql`), sin contar las `wms_*`.
-- **Scripts posteriores al esquema base** (se ejecutan a mano en el SQL Editor de Supabase, primero en QA y luego en produccion; ver `specs/00-bootstrap.sql`): `13-pos-wms-url.sql`, `15-store-pedido-seguro.sql`, `16-store-cerrar-acceso-anon.sql`, `17-store-checkout-coherente.sql`.
+- **Scripts posteriores al esquema base** (se ejecutan a mano en el SQL Editor de Supabase, primero en QA y luego en produccion; ver `specs/00-bootstrap.sql`): `13-pos-wms-url.sql`, `15-store-pedido-seguro.sql`, `16-store-cerrar-acceso-anon.sql`, `17-store-checkout-coherente.sql`, `18-pos-pedidos-web.sql`.
 - **Funciones de la tienda (RPC):** `st_crear_pedido`, `st_cotizar_envio`, `st_config_tienda` (publicas, `anon`) y `st_cfg`, `st_zona_envio`, `st_normalizar_texto` (internas). Contratos en `specs/11-api-contracts.md` §9.
+- **Funciones del POS para pedidos web (T4, solo `authenticated`):** `pos_pedidos_web_contar`, `pos_pedidos_web_listar`, `pos_pedido_web_detalle`, `pos_pedido_web_cerrar` (para usuarios del POS con sesion) y las internas `pos_usuario_sesion`, `pos_pedido_web_json`. Columnas nuevas en `st_pedidos`: `gestionado_at`, `gestionado_por`, `nota_gestion`. Contratos en `specs/11-api-contracts.md` §10.
 
 ### 3.3 Licenciamiento
 - El SaaS se puede vender **por módulos separados** (POS solo, Store solo, o bundle)
@@ -227,7 +230,7 @@ El proyecto incluye skills especializadas en `.opencode/skills/` y `.claude/skil
 
 ### 5.1 Reglas de la Tienda (apps/store) — vigentes desde T2/T3b (nov 2026)
 
-Estas reglas **reemplazan** lo que digan entradas antiguas de este archivo (por ejemplo "checkout con 7 operaciones REST", `seed-anon-grants-store.sql` o `metodo_pago_id` en pedidos web). El detalle, la evidencia y las decisiones D1-D28 estan en `apps/store/specs/hallazgos-tienda.md`.
+Estas reglas **reemplazan** lo que digan entradas antiguas de este archivo (por ejemplo "checkout con 7 operaciones REST", `seed-anon-grants-store.sql` o `metodo_pago_id` en pedidos web). El detalle, la evidencia y las decisiones D1-D35 estan en `apps/store/specs/hallazgos-tienda.md`.
 
 | Decision | Valor |
 |---|---|
@@ -246,6 +249,25 @@ Estas reglas **reemplazan** lo que digan entradas antiguas de este archivo (por 
 | Despliegue de cambios con SQL | 1) script en QA, 2) frontend en `KUBIT-Pruebas` y pruebas, 3) script en produccion, 4) valores reales por `UPDATE` si aplica, 5) commit con `git add` por archivo (nunca `git add .`), 6) prueba de humo, 7) borrar pedidos de prueba en un solo bloque `begin; ... commit;`. Un script que **cierra** permisos va despues de publicar el frontend (caso del 16). |
 | Tests de la tienda | `node --test tests/store/*.test.mjs` (111 casos) ademas de `npm test` (Vitest, 119). Los `.mjs` usan `node:test` + `node:vm` y no tocan la base; los SQL se validan como texto y su ejecucion real se prueba en QA. Vitest solo toma `tests/**/*.test.js`. |
 | Cache de la tienda | `apps/store/service-worker.js`: `outletshop-YYYYMMDD-NN`, se sube en cada deploy de la tienda. Vigente: `outletshop-20261108-02`. |
+
+### 5.2 Pedidos web en el POS (T4) — vigente desde 2026-11-08
+
+Decisiones ya tomadas (no reabrir). Detalle y evidencia: `apps/store/specs/hallazgos-tienda.md` (ST-15, D29-D35).
+
+| Decision | Valor |
+|---|---|
+| Flujo del negocio | El cliente hace el pedido en la tienda → el POS avisa → se gestiona por **WhatsApp** (se verifica pago y disponibilidad y se acuerda el envio) → si se concreta, la venta se registra **a mano** en Ventas con el canal **Web** (cliente real creado en Clientes, o `222222222222`) → se **cierra el pedido** en `pedidos-web.html`. |
+| Inventario | El pedido web y su cierre **no mueven inventario, no crean ventas ni clientes** (D2). El stock solo cambia con la venta registrada en el POS. |
+| Acceso a los datos | El POS **no lee** `st_pedidos`, `st_pedidos_detalle` ni `st_direcciones` directo (las politicas de `st_direcciones` solo le dejan ver filas de su propio `cliente_id`, y todos los pedidos web van a nombre de CONSUMIDOR Ecommerce). Usa `DB.pedidosWeb` → funciones `security definer` de `specs/18-pos-pedidos-web.sql`. |
+| Quien puede usarlas | Todo usuario **activo** de `pos_usuarios` con sesion de Supabase Auth (`pos_usuario_sesion()`: mismo `id` que `auth.users`, respaldo por correo). No hay permiso propio (hoy solo el administrador). Sin sesion responden `[POS_SESION]`. `anon` no ejecuta ninguna. |
+| Aviso al entrar | `js/compartido/pedidos-web-aviso.js` (archivo independiente, solo lectura; lo carga `database.js::cargarLinkTienda()` → `cargarAvisoPedidosWeb()`): enlace "Pedidos web (N)" debajo de Dashboard (`#link-pedidos-web`, `#badge-pedidos-web`), tarjeta en el Panel (`#card-pedidos-web`) y aviso emergente (`#modal-aviso-pedidos-web`) **una vez por inicio de sesion** (`sessionStorage`, clave `kubit_aviso_pedidos_web` = `loginAt`). No actua en `login.html` ni `index.html`; el aviso no sale dentro de `pedidos-web.html`. Si algo falla no muestra nada y **no redirige** (llama directo a `__supabase.rpc`, no a `DB`). |
+| Pantalla | `pedidos-web.html` + `js/paginas/pedidos-web.js`: pestañas "Por gestionar" (`PENDIENTE`, mas antiguos primero) y "Gestionados (30 dias)"; cada pedido es una tarjeta `<details class="grupo-card">` **cerrada por defecto**. Muestra numero, hora y antiguedad, nombre, celular, correo (solo si lo dio), direccion, productos con SKU y stock de hoy, subtotal, envio, total, medio de pago y el aviso de stock. Botones: "Escribir por WhatsApp" (`Hola {nombre}, te escribimos de OutletShop por tu pedido KBT-… por $X`), "Copiar datos del cliente" y "Cerrar pedido". |
+| Cerrar pedido | Resultado **obligatorio**: "Venta registrada" → `CONFIRMADO`; "No se concreto" → `CANCELADO` (sin motivo). Numero de venta **opcional** (solo con "Venta registrada"): debe existir en `pos_ventas`, no estar anulada ni enlazada a otro pedido; se guarda en `st_pedidos.venta_id`. Nota opcional (500). Solo se cierran pedidos `PENDIENTE`; queda `gestionado_at`, `gestionado_por` y `nota_gestion`. |
+| Fuera de alcance | Estados `PAGADO`, `ENVIADO` y `ENTREGADO`, registro de pagos, transportadora y guia, "Crear venta en POS" automatico y pantalla de configuracion de la tienda (ST-31, propuesta aparte). |
+| Errores | Prefijo `[POS_xxx]`: `POS_SESION`, `POS_VISTA`, `POS_PEDIDO`, `POS_YA_GESTIONADO`, `POS_RESULTADO`, `POS_NOTA`, `POS_VENTA`. `DB.pedidosWeb` los devuelve como `{ error, codigo }`. |
+| Despliegue | Script 18 en QA → frontend en `KUBIT-Pruebas` y pruebas → script 18 en produccion → frontend → prueba de humo (crear un pedido en la tienda, verlo en el POS, cerrarlo "No se concreto" y borrarlo). El script solo agrega: no hay riesgo de orden. `apps/pos/service-worker.js` sube la cache (`kubit-pos-20261108-01`) y precachea los 3 archivos nuevos. |
+| Tests | `node --test tests/pos/*.test.mjs` (29 casos): `.mjs`, `node:test` + `node:vm`, no tocan la base; el SQL 18 se valida como texto y su ejecucion real se prueba en QA. |
+| Menu lateral | `<nav id="sidebar">` sigue con 3 hijos directos: el enlace "Pedidos web" se inserta dentro de la lista (segundo hijo), debajo de Dashboard. |
 
 ---
 
@@ -278,8 +300,9 @@ Estas reglas **reemplazan** lo que digan entradas antiguas de este archivo (por 
 - [x] `ARCHITECTURE.md` — Estructura de directorios
 - [x] `AGENTS.md` — Memoria persistente (este archivo)
 - [x] `CONTEXT.md` — Glosario de dominio del proyecto
-- [x] `apps/store/specs/hallazgos-tienda.md` — Hallazgos, decisiones, riesgos aceptados y plan T1-T6 de la tienda (v5)
+- [x] `apps/store/specs/hallazgos-tienda.md` — Hallazgos, decisiones, riesgos aceptados y plan T1-T6 de la tienda (v6)
 - [x] `15-store-pedido-seguro.sql`, `16-store-cerrar-acceso-anon.sql`, `17-store-checkout-coherente.sql` — Scripts de la tienda (T2 y T3b), ejecutados en QA y produccion
+- [x] `18-pos-pedidos-web.sql` — Pedidos web en el POS (T4): columnas de gestion de `st_pedidos` y funciones `pos_pedido*_web_*`, ejecutado en QA y produccion
 
 ### 7.2 Completado (Implementación)
 
@@ -291,7 +314,7 @@ Estas reglas **reemplazan** lo que digan entradas antiguas de este archivo (por 
 - [x] `producto.js` — Async detalle producto + relacionados
 - [x] Todas las páginas migradas: `data.js` → `supabase-client.js`
 - [x] `MigracionProductos.sql` — DML generado automáticamente (100 productos, 1158 INSERTs total: 100 pos_productos + 100 detalle + 958 multimedia)
-- [x] `checkout.js` — ~~Guest checkout con 7 operaciones REST secuenciales~~ **(OBSOLETO desde T2, 2026-11-03):** el pedido se crea con una sola llamada a `st_crear_pedido`. Ver §5.1 y el bloque "Modulo Store — Plan de mejora T1 a T3b" abajo.
+- [x] `checkout.js` — ~~Guest checkout con 7 operaciones REST secuenciales~~ **(OBSOLETO desde T2, 2026-11-03):** el pedido se crea con una sola llamada a `st_crear_pedido`. Ver §5.1 y el bloque "Modulo Store — Plan de mejora T1 a T4" abajo.
 - [x] **Favicon SVG**: `<link rel="icon" type="image/svg+xml" href="img/icon.svg">` agregado en las 8 páginas HTML
 - [x] **Navbar fixed**: `navbar-store.js` cambiado de `sticky` a `fixed top-0 left-0 right-0 z-50 w-full` para que el navbar (logo, búsqueda, redes, carrito) permanezca visible al scrollear en todas las páginas. `pt-14` agregado al `<main>` wrapper para compensar altura.
 - [x] **icon2.svg**: Nuevo archivo de icono minimalista (bolsa/tienda) para uso futuro
@@ -437,9 +460,9 @@ Estas reglas **reemplazan** lo que digan entradas antiguas de este archivo (por 
 - [x] Fix: Menú hamburguesa roto en herramientas.html (sidebar.js no existía) y renombrar-archivos.html (no incluía el script)
 - [x] Tests: `npm test` → 99 passed, 0 failures
 
-#### Modulo Store — Plan de mejora T1 a T3b (oct-nov 2026)
+#### Modulo Store — Plan de mejora T1 a T4 (oct-nov 2026)
 
-Detalle completo en `apps/store/specs/hallazgos-tienda.md` (hallazgos ST-01 a ST-31, riesgos RA-01 a RA-05, decisiones D1-D28).
+Detalle completo en `apps/store/specs/hallazgos-tienda.md` (hallazgos ST-01 a ST-31, riesgos RA-01 a RA-05, decisiones D1-D35).
 
 **T1 — Correcciones rapidas (2026-10-28, `f7ce184`, cache `outletshop-20261028-01`)**
 - [x] Carrito y pedido por variante (`detalleId`), precio propio por variante, variantes agotadas y eliminadas no se compran, "Elegir opcion" y "Desde $X" en la grilla (ST-01, 02, 03, 25, 26, 27, 28).
@@ -464,6 +487,15 @@ Detalle completo en `apps/store/specs/hallazgos-tienda.md` (hallazgos ST-01 a ST
 - [x] Produccion: tarifas reales cargadas por `UPDATE` (local $15.000, Antioquia $18.000, ciudades principales $25.000, nacional $30.000, zonas especiales $42.000), llave Bre-B, titular y Tu Link configurados en `st_configuracion`.
 - [x] `tests/store/store-t3b.test.mjs` (total tienda: 111 casos).
 
+**T4 — Pedidos web en el POS (2026-11-08, `1bddcb5`, cache POS `kubit-pos-20261108-01`)**
+- [x] `specs/18-pos-pedidos-web.sql`: columnas `st_pedidos.gestionado_at`, `gestionado_por` y `nota_gestion`; funciones `pos_pedidos_web_contar()`, `pos_pedidos_web_listar(p_vista)`, `pos_pedido_web_detalle(p_pedido_id)`, `pos_pedido_web_cerrar(p_pedido_id, p_resultado, p_numero_venta, p_nota)` y las internas `pos_usuario_sesion()` y `pos_pedido_web_json()`. Solo agrega: no cambia politicas ni toca inventario, ventas, clientes ni la tienda (ST-15).
+- [x] `apps/pos/pedidos-web.html` y `js/paginas/pedidos-web.js`: pestañas Por gestionar y Gestionados (30 dias), tarjetas colapsables cerradas por defecto, WhatsApp, copiar datos del cliente y cierre del pedido.
+- [x] `apps/pos/js/compartido/pedidos-web-aviso.js`: enlace "Pedidos web (N)" en el menu, tarjeta en el Panel y aviso emergente una vez por sesion. Archivo independiente y de solo lectura.
+- [x] `apps/pos/js/compartido/database.js`: solo se agregaron `DB.pedidosWeb` (`contar`, `listar`, `detalle`, `cerrar`) y la carga del aviso en `cargarLinkTienda()`.
+- [x] `apps/pos/service-worker.js`: cache `kubit-pos-20261108-01` y 3 archivos nuevos en ASSETS.
+- [x] `tests/pos/pedidos-web.test.mjs` (23) y `tests/pos/pedidos-web-ui.test.mjs` (6): 29 casos.
+- [x] Produccion: script 18 ejecutado y verificado, frontend publicado y prueba de humo hecha; el pedido de prueba se borro (OP-04). QA conserva sus pedidos de prueba (`KBT-202611-000001` a `-000010`: 2 cerrados y 8 pendientes), por eso el aviso de QA sigue apareciendo.
+
 ### 7.3 Pendiente
 - [ ] `06-academy-spec.md` — Especificación del módulo Academy (post-MVP)
 - [x] Migrar datos Fase 1: ejecutar scripts `01-migrate-usuarios.sql` → `08-migrate-gastos-mensuales-detalle.sql` en orden FK
@@ -481,10 +513,11 @@ Detalle completo en `apps/store/specs/hallazgos-tienda.md` (hallazgos ST-01 a ST
 - [ ] Bug #16: "Rentabilidad TOTAL" suma `ventas_netas`.
 - [ ] Bug #17: editar una venta de la ultima unidad (la validacion de stock no suma las unidades de la original).
 - [ ] Revision de seguridad en detalle (a tratar aparte).
-- [ ] Tienda T4 (ST-15): pedidos web en el POS (contador en el menu, tarjeta en el Panel, `pedidos-web.html`, estados, pago, guia, asignar cliente real, "Crear venta en POS").
+- [x] Tienda T4 (ST-15) hecha el 2026-11-08 (ver 7.2 y 5.2). Quedaron fuera de alcance: estados intermedios, registro de pagos y guias y "Crear venta en POS".
 - [ ] Tienda ST-31: pantalla para editar `st_configuracion` y tarifas de envio sin SQL (hoy solo por `UPDATE`). Requiere funciones que validen administrador; las tablas no estan abiertas a `authenticated`.
 - [ ] Tienda T5 (ST-16 a ST-21) y T6 (ST-22, 23, 24, 30 y decision final de RA-04). Ver `apps/store/specs/hallazgos-tienda.md` §7.
-- [ ] Skills `.claude/skills/kubit-store/SKILL.md` y `.opencode/skills/kubit-store/SKILL.md`: revisar que no indiquen el checkout de 7 operaciones REST.
+- [x] Skills `kubit-store` y `kubit-pos` (`.claude` y `.opencode`) actualizados hasta T4 (2026-11-08).
+- [ ] Produccion: los usuarios `admin` y `admin_497a2c95` de `pos_usuarios` no existen en Supabase Auth (no pueden iniciar sesion ni usar las funciones de pedidos web). Depurarlos o crearlos en Authentication > Users si hacen falta (ver 10.5).
 
 ### 7.5 Completado (Documentacion de Migracion)
 - [x] `specs/14-migracion-datos.md` — Spec completo de migracion V1→V2 con analisis campo a campo de 8 tablas (actualizado con Fase 2 y Fase 3)
@@ -698,7 +731,7 @@ Cada fase indica que cambio, los archivos y la version del cache. Commits entre 
 - [x] Se corrigieron en produccion las filas de `pos_finanzas_mensuales` de ago, sep y oct 2026 para que cuadren con `pos_ventas` (ver §5 y `specs/03-pos-spec.md` §3.6.2). Nov 2025 no se toca (ventas importadas desde CSV).
 
 ### 7.4 Próximo Paso Recomendado
-**Tienda:** T4 (pedidos web en el POS), que tambien puede incluir ST-31 (pantalla de configuracion de la tienda).
+**Tienda:** T4 (pedidos web en el POS) ya esta en produccion. Siguiente: T5 (alcance y rendimiento) o ST-31 (pantalla de configuracion de la tienda), a decidir.
 **Despues del deploy:** Integración con MercadoLibre para sincronizar productos y pedidos.
 
 ---
@@ -768,6 +801,12 @@ Cada fase indica que cambio, los archivos y la version del cache. Commits entre 
 - **Nunca se copian entre carpetas.** Las listas de copia de Pruebas a Produccion los excluyen y los commits se hacen con `git add` por archivo. Verificacion: `diff -rq --strip-trailing-cr --exclude=.git --exclude=node_modules --exclude=.vercel KUBIT-PRODUCCION KUBIT-Pruebas` debe mostrar solo esos 3 archivos.
 - Si un `supabase-client.js` quedo con el ambiente equivocado: `git restore --source=HEAD -- apps/store/js/api/supabase-client.js`.
 - Antes del commit: `git diff --cached | grep -c "eyJ"` debe dar 0 (excepto cuando el commit incluye `tests/store/ambiente.test.mjs`, que contiene `eyJ` dentro de una expresion regular).
+
+### 10.5 Usuarios del POS y Supabase Auth (2026-11-08)
+- El login del POS es contra Supabase Auth (`auth.js` obtiene el token y `supabase.js` lo envia en cada llamada).
+- Las funciones de pedidos web identifican al usuario con `auth.uid()` (`pos_usuario_sesion()`): el `id` de `pos_usuarios` debe ser el mismo de `auth.users` (respaldo: mismo correo) y estar activo. Un usuario de `pos_usuarios` sin cuenta en Auth no puede iniciar sesion ni usarlas.
+- Hoy: produccion → solo `outletshoptiendavirtual@gmail.com` esta en Auth; QA → solo `admin_pruebas`.
+- Verificacion (solo lectura): `select u.usuario, u.activo, (a.id is not null) as existe_en_auth from public.pos_usuarios u left join auth.users a on a.id = u.id where u.deleted_at is null;`
 
 ---
 
@@ -1382,6 +1421,13 @@ Cada fase indica que cambio, los archivos y la version del cache. Commits entre 
 | Precios vigentes en carrito | `utils.js::refrescarPreciosCarrito()`, `avisoCambiosCarrito()` |
 | Tests de la tienda | `tests/store/*.test.mjs`, `node --test`, `_entorno.mjs` |
 | Credenciales por ambiente | `config.js` (POS y WMS), `supabase-client.js` (tienda), `tests/store/ambiente.test.mjs`, AGENTS.md §10.4 |
+| Pedidos web en el POS (T4) | `specs/18-pos-pedidos-web.sql`, `apps/pos/pedidos-web.html`, `js/paginas/pedidos-web.js`, `js/compartido/pedidos-web-aviso.js`, `DB.pedidosWeb`; AGENTS.md §5.2 |
+| Funciones pos_pedido_web | `pos_pedidos_web_contar()`, `pos_pedidos_web_listar(p_vista)`, `pos_pedido_web_detalle(p_pedido_id)`, `pos_pedido_web_cerrar(...)`, `pos_usuario_sesion()`, `pos_pedido_web_json()`; contrato en `specs/11-api-contracts.md` §10 |
+| Aviso de pedidos web | `pedidos-web-aviso.js`, `#link-pedidos-web`, `#badge-pedidos-web`, `#card-pedidos-web`, `#modal-aviso-pedidos-web`, `sessionStorage` `kubit_aviso_pedidos_web`, `database.js::cargarAvisoPedidosWeb()` |
+| Cerrar pedido web | `pedidos-web.js::confirmarCierre()`, `DB.pedidosWeb.cerrar(id, resultado, numeroVenta, nota)` con resultado `venta` o `no_concretado`, `st_pedidos.gestionado_at`, `gestionado_por`, `nota_gestion`, `venta_id`, estados `CONFIRMADO` y `CANCELADO` |
+| Tarjetas colapsables de pedidos | `pedidos-web.js::htmlPedido()`, `<details class="grupo-card">` cerrado por defecto, `estilo.css` `.grupo-card` |
+| Tests del POS con node | `tests/pos/*.test.mjs`, `node --test tests/pos/*.test.mjs`, `tests/pos/pedidos-web.test.mjs`, `pedidos-web-ui.test.mjs` |
+| Usuarios del POS vs Auth | `pos_usuario_sesion()`, `auth.users`, AGENTS.md §10.5 |
 
 ## 13. Registro de Cambios (continuacion)
 
@@ -1700,3 +1746,17 @@ Cada fase indica que cambio, los archivos y la version del cache. Commits entre 
 | `apps/store/specs/hallazgos-tienda.md` (v5) y `apps/store/memory/progress.md` | T3b hecho (`679251a`), tarifas reales, ST-31, OP-03. |
 | **SQL (ejecutado por el usuario)** | 15 y 16 (2026-11-03) y 17 + valores reales en `st_configuracion` y `st_tarifas_envio` (2026-11-08), en QA y produccion. |
 | Tests | `node --test tests/store/*.test.mjs` → 111 passed; `npm test` → 119 passed. |
+
+#### 2026-11-08 — Tienda: T4 (pedidos web en el POS) documentada
+
+| Archivo | Cambio |
+|---|---|
+| `AGENTS.md` y `CLAUDE.md` | Encabezado; §3.1 (script 18 y `tests/pos`); §3.2 (script 18, funciones del POS para pedidos web); nueva §5.2 (reglas de pedidos web en el POS); §7.1, §7.2 (bloque T4), §7.3 (T4 hecha, usuarios sin cuenta en Auth), §7.4; nueva §10.5 (usuarios del POS y Supabase Auth); §11 (keywords). |
+| `specs/03-pos-spec.md` | Nueva §14 (Pedidos web de la Tienda en el POS); §6.1 corregida (el pedido web no mueve inventario); §12.4 (enlace "Pedidos web"); Glosario pasa a §15. |
+| `specs/04-store-spec.md` | §2.6 (columnas y funciones de T4); §3.5 y §4.1 (gestion real por WhatsApp); nueva §3.11 (gestion del pedido en el POS); §6.1 (nota). |
+| `specs/11-api-contracts.md` | Nueva §10 (RPC del POS para pedidos web, JSON del pedido y errores `[POS_xxx]`). |
+| `specs/00-bootstrap.sql`, `01-master-spec.md`, `ARCHITECTURE.md`, `12-roadmap.md`, `13-testing-model.md` | Paso 9 (script 18), archivos nuevos del POS, `tests/pos`, T4 hecha y nueva suite `node --test tests/pos/*.test.mjs` (§12.2). |
+| `apps/store/specs/hallazgos-tienda.md` (v6) y `apps/store/memory/progress.md` | ST-15 hecho, decisiones D29 a D35, OP-04, historial. |
+| `.claude/skills` y `.opencode/skills` | `kubit-store` y `kubit-pos` actualizados con pedidos web. |
+| **SQL (ejecutado por el usuario)** | 18 en QA y produccion (2026-11-08). |
+| Tests | `node --test tests/pos/*.test.mjs` → 29 passed; `node --test tests/store/*.test.mjs` → 111 passed; `npm test` → 119 passed. |

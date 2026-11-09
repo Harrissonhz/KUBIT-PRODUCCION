@@ -27,6 +27,7 @@
 │   ├── 15-store-pedido-seguro.sql      ← Tienda T2: st_crear_pedido, numero de pedido, st_direcciones.email
 │   ├── 16-store-cerrar-acceso-anon.sql ← Tienda T2: cierra el acceso anon a pedidos, detalle y direcciones
 │   ├── 17-store-checkout-coherente.sql ← Tienda T3b: configuracion, zonas de envio, medio_pago_web, st_crear_pedido v2
+│   ├── 18-pos-pedidos-web.sql          ← POS T4: gestion de pedidos web (columnas de st_pedidos y funciones pos_pedido*_web_*)
 │   └── seed-permisos.sql         ← Seed de roles y permisos
 │
 ├── apps/
@@ -49,6 +50,7 @@
 │   │   ├── reportes.html         ← Reportes financieros
 │   │   ├── configuracion.html    ← Configuración de empresa
 │   │   ├── herramientas.html     ← Hub de herramientas
+│   │   ├── pedidos-web.html      ← Pedidos de la tienda (T4): por gestionar / gestionados
 │   │   ├── factura-print.html    ← Vista de impresión de factura
 │   │   ├── vercel.json           ← Rewrite rules para Vercel
 │   │   ├── manifest.json         ← PWA manifest
@@ -61,7 +63,8 @@
 │   │   │   ├── compartido/
 │   │   │   │   ├── database.js   ← DatabaseService (CRUD genérico + entity-specific)
 │   │   │   │   ├── auth.js       ← Autenticación (login/sesión/permisos)
-│   │   │   │   └── sidebar.js    ← toggleSidebar() compartido
+│   │   │   │   ├── sidebar.js    ← toggleSidebar() compartido
+│   │   │   │   └── pedidos-web-aviso.js ← T4: menu, aviso emergente y tarjeta del Panel (solo lectura)
 │   │   │   ├── paginas/
 │   │   │   │   ├── panel.js
 │   │   │   │   ├── ventas.js
@@ -74,6 +77,7 @@
 │   │   │   │   ├── compras.js
 │   │   │   │   ├── proveedores.js
 │   │   │   │   ├── clientes.js
+│   │   │   │   ├── pedidos-web.js    ← T4: pedidos de la tienda (WhatsApp y cierre)
 │   │   │   │   ├── caja.js
 │   │   │   │   ├── gastos.js
 │   │   │   │   ├── reportes.js
@@ -132,6 +136,9 @@
 │   │   └── productos.test.js      ← 10 tests
 │   ├── helpers/
 │   │   └── calculos-pos.js        ← Funciones puras (IVA, descuento, formato)
+│   ├── pos/                       ← Tests de pedidos web del POS (node --test, NO vitest)
+│   │   ├── pedidos-web.test.mjs   ← T4: DB.pedidosWeb, aviso, pagina y script 18 (23 casos)
+│   │   └── pedidos-web-ui.test.mjs← T4: tarjetas colapsables y colores (6 casos)
 │   └── store/                     ← Tests de la tienda (node --test, NO vitest)
 │       ├── _entorno.mjs           ← Utilidades: navegador y Supabase simulados (no es test)
 │       ├── store-t1.test.mjs      ← T1: variantes en carrito y pedido
@@ -192,12 +199,14 @@
 ### 2.5 Capa de Datos: REST Directa vs Edge Functions
 - POS: 100% REST API directa a Supabase (PostgREST) via `supabase.js`
 - Store: lectura del catalogo por REST directa via `apps/store/js/api/supabase-client.js`; **pedidos solo por la funcion `st_crear_pedido`** (RPC `security definer`, una transaccion) desde T2. Envio y configuracion por `st_cotizar_envio` y `st_config_tienda` (T3b). Ver `specs/11-api-contracts.md` §9
+- POS, pedidos web (T4): `DB.pedidosWeb` llama funciones `security definer` (`pos_pedido*_web_*`, `specs/18-pos-pedidos-web.sql`); el POS no lee `st_pedidos` ni `st_direcciones` directo. Ver `specs/11-api-contracts.md` §10
 - Sin Edge Functions en producción. ~~El checkout usa 7 operaciones REST secuenciales~~ (obsoleto desde T2, 2026-11-03)
 
 ### 2.6 Testing
 - vitest + jsdom para tests unitarios y de integración
 - POS: 119 tests en 5 suites de Vitest (`npm test`, solo `tests/**/*.test.js`)
 - Tienda: 111 casos en `tests/store/*.test.mjs` con `node --test` (sin dependencias, `node:test` + `node:vm`; no tocan la base; los scripts SQL se validan como texto)
+- POS pedidos web (T4): 29 casos en `tests/pos/*.test.mjs` con `node --test` (mismo estilo que `tests/store`)
 - Zona horaria: America/Bogota (UTC-5) via `ALTER DATABASE SET timezone`
 - Mocks de `window.__supabase`, `window.KubitAuth`, `localStorage` en `tests/setup.js`
 

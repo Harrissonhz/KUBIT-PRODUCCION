@@ -288,11 +288,25 @@ La tienda tiene su propia suite, separada de Vitest:
 | Archivos actuales | `store-t1` (20), `store-t2` (35), `ambiente` (4), `store-t3a` (15), `store-t3b` (37) = **111 casos** |
 | Regla por fase | Cada fase de la tienda agrega su `store-<fase>.test.mjs`; los anteriores deben seguir pasando |
 
-**Antes de cualquier commit** se corren las dos suites:
+**Antes de cualquier commit** se corren las tres suites:
 ```bash
 node --test tests/store/*.test.mjs   # tienda: pass 111, fail 0
+node --test tests/pos/*.test.mjs     # POS pedidos web (T4): pass 29, fail 0
 npm test                             # POS (Vitest): 119 passed
 ```
+
+## 12.2 Tests de pedidos web del POS (`tests/pos/`, desde 2026-11-08)
+
+El POS sigue probándose con Vitest (`npm test`). Los tests de la fase T4 (pedidos web) están en una carpeta aparte, con el mismo estilo que la tienda:
+
+| Aspecto | Regla |
+|---|---|
+| Ubicación | `tests/pos/*.test.mjs` (módulos ES). Vitest solo toma `tests/**/*.test.js`: **no** usar extensión `.js` |
+| Runner | `node --test tests/pos/*.test.mjs` (sin dependencias: `node:test`, `node:assert`, `node:vm`) |
+| Entorno | Cada archivo arma un DOM mínimo y un `__supabase` simulado (`get`, `post`, `rpc`, …), y carga con `node:vm` el código **real** de `apps/pos` (`database.js`, `pedidos-web-aviso.js`, `pedidos-web.js`). No es un test de base de datos |
+| Base de datos | No tocan la base. `specs/18-pos-pedidos-web.sql` se valida como texto (columnas, permisos, reglas de cierre); su ejecución real se prueba a mano en QA |
+| Archivos actuales | `pedidos-web.test.mjs` (23: `DB.pedidosWeb`, carga del aviso, menú, aviso una vez por sesión, tarjeta del Panel, página, SQL 18) y `pedidos-web-ui.test.mjs` (6: tarjetas colapsables cerradas por defecto, encabezado y colores) = **29 casos** |
+| Regla por fase | Cada cambio de pedidos web agrega o ajusta sus casos; los anteriores deben seguir pasando |
 
 ## 13. Referencias
 

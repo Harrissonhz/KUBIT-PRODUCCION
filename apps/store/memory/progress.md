@@ -5,23 +5,22 @@ Registro corto del estado. El detalle está en `specs/hallazgos-tienda.md`.
 ## Estado actual (2026-11-08)
 
 - La tienda está en producción y no ha recibido pedidos reales (todos los pedidos de prueba se borraron: OP-01 y OP-02).
-- Hallazgos ST-01 a ST-30, riesgos aceptados RA-01 a RA-05 y plan T1–T6.
+- Hallazgos ST-01 a ST-31, riesgos aceptados RA-01 a RA-05 y plan T1–T6.
 - **T1 publicada (`f7ce184`):** carrito y pedido por variante (SKU) con su propio precio; variantes agotadas y eliminadas no se pueden comprar; "Elegir opción" y "Desde $X".
 - **T2 publicada (`b3bc908`):** los pedidos se crean solo con la función `st_crear_pedido` (una transacción, precio del POS, cliente CONSUMIDOR Ecommerce, número `KBT-AAAAMM-NNNNNN` por secuencia, aviso de stock en `notas` sin rechazar). Celular obligatorio y correo opcional, sin cédula. Carrito y checkout vuelven a leer el precio del POS. Acceso anónimo a `st_pedidos`, `st_pedidos_detalle` y `st_direcciones` cerrado. Caché `outletshop-20261030-01`.
 - Scripts en producción y QA: `specs/15-store-pedido-seguro.sql` y `specs/16-store-cerrar-acceso-anon.sql`.
 - **T3a publicada (`92dc65b`, `272bc1d`):** "Preguntar por WhatsApp" en la ficha con producto, opción, SKU, precio y enlace, y el logo completo de WhatsApp; paginación estable por visita. Caché `outletshop-20261108-01`.
 - **T3b publicada (`679251a`):** script `specs/17-store-checkout-coherente.sql` (zonas de envío, envío gratis desde $80.000, pedido mínimo $15.000, `medio_pago_web`, instrucciones de pago); checkout con 3 medios (Transferencia Bre-B, Tarjeta vía Mercado Pago, Contraentrega), envío y días por ciudad y confirmación con "Copiar", "Pagar con Mercado Pago" y "Confirmar por WhatsApp"; términos y preguntas frecuentes alineados. Caché `outletshop-20261108-02`.
 - Producción con valores reales: tarifas local $15.000, Antioquia $18.000, ciudades principales $25.000, nacional $30.000, zonas especiales $42.000; llave Bre-B, titular y Tu Link en `st_configuracion`. QA conserva valores de prueba.
-- Scripts en producción y QA: 15, 16 y 17.
-- Pruebas automatizadas: `node --test tests/store/*.test.mjs` (111/111) y `npm test` (119/119).
+- Scripts en producción y QA: 15, 16, 17 y 18.
+- **T4 publicada (`1bddcb5`, caché POS `kubit-pos-20261108-01`):** pedidos web en el POS. Script `specs/18-pos-pedidos-web.sql` (columnas `gestionado_at`, `gestionado_por`, `nota_gestion` y funciones `pos_pedido*_web_*`); aviso al entrar (una vez por sesión), "Pedidos web (N)" en el menú y tarjeta en el Panel; página `pedidos-web.html` con tarjetas colapsables, WhatsApp, copiar datos del cliente y cierre ("Venta registrada" → `CONFIRMADO`, "No se concretó" → `CANCELADO`, número de venta y nota opcionales). El pedido web sigue sin mover inventario: la venta se registra a mano. QA conserva sus pedidos de prueba (`KBT-202611-000001` a `-000010`).
+- Pruebas automatizadas: `node --test tests/store/*.test.mjs` (111/111), `node --test tests/pos/*.test.mjs` (29/29) y `npm test` (119/119).
 - `KUBIT-Pruebas` sincronizada con producción (`837c110`); solo difieren los 3 archivos de credenciales.
 
 ## Siguiente paso
 
-- **T4 Pedidos web en el POS** (ST-15), posiblemente con ST-31 (pantalla para editar la configuración de la tienda).
-- OP-03 hecha (2026-11-08): pedidos de la prueba de humo de T3b borrados de producción.
-- Pendiente aparte: RA-04 (quitar `anon crean clientes` tras verificar el POS en QA) y ST-30.
-- Revisar `.claude/skills/kubit-store/SKILL.md` y `.opencode/skills/kubit-store/SKILL.md`.
+- Decidir: **T5** (alcance y rendimiento: búsqueda por SKU y sin tildes, SEO, rendimiento) o **ST-31** (pantalla para editar la configuración de la tienda sin SQL).
+- Pendiente aparte: RA-04 (quitar `anon crean clientes` tras verificar el POS en QA), ST-30 y depurar en producción los usuarios `admin` y `admin_497a2c95` de `pos_usuarios`, que no existen en Supabase Auth (AGENTS.md §10.5).
 
 ## Avance por fase
 
@@ -31,7 +30,7 @@ Registro corto del estado. El detalle está en `specs/hallazgos-tienda.md`.
 | T2 Pedido seguro | Hecho | 2026-11-03 | b3bc908 |
 | T3a WhatsApp y paginación | Hecho | 2026-11-08 | 92dc65b, 272bc1d |
 | T3b Checkout coherente | Hecho | 2026-11-08 | 679251a |
-| T4 Pedidos web en el POS | Pendiente | | |
+| T4 Pedidos web en el POS | Hecho | 2026-11-08 | 1bddcb5 |
 | T5 Alcance y rendimiento | Pendiente | | |
 | T6 Deuda técnica | Pendiente | | |
 
@@ -46,3 +45,6 @@ Registro corto del estado. El detalle está en `specs/hallazgos-tienda.md`.
 - **2026-11-08:** T3a probada en `KUBIT-Pruebas` (tests 73/73 y pruebas manuales) y publicada (`92dc65b`; Pruebas `f492026`). Ajuste: logo completo de WhatsApp en el botón (`272bc1d`; Pruebas `9a7fcc1`), tests 74/74.
 - **2026-11-08:** T3b: decisiones D23–D28; script 17 probado en QA (zonas Itagüí/local, Barbosa de Santander/nacional, Leticia/especial; pedidos `KBT-202611-000006` a `-000010` con envío por zona, envío gratis, los 3 medios y stock insuficiente sin instrucciones de pago); POS y WMS sin cambios. Publicada en producción (`679251a`): script 17, `UPDATE` con tarifas, llave, titular y Tu Link reales, frontend y prueba de humo. RA-03 ratificado con las tarifas reales. Nuevo ST-31.
 - **2026-11-08:** documentación del proyecto actualizada para T1 a T3b (`AGENTS.md`, `CLAUDE.md`, `specs/04-store-spec.md`, `11-api-contracts.md`, `00-bootstrap.sql`, `01-master-spec.md`, `ARCHITECTURE.md`, `12-roadmap.md`, `13-testing-model.md`, este archivo y `hallazgos-tienda.md` v5).
+- **2026-11-08:** T4 reformulada con el negocio: la gestión es por WhatsApp; el POS avisa, muestra los datos y permite cerrar el pedido (D29–D35). Script `18` probado en QA con `admin_pruebas` (solo ese usuario existe en Supabase Auth de QA): aviso, contador, tarjeta del Panel, cierre con número de venta (`CONFIRMADO` con `venta_id`) y sin él (`CANCELADO`), número de venta inexistente rechazado, tarjetas colapsables y colores en modo claro y oscuro. POS y WMS sin cambios de comportamiento.
+- **2026-11-08:** T4 publicada en producción (`1bddcb5`): script 18, frontend y prueba de humo con un pedido de prueba, borrado después (OP-04). QA conserva sus pedidos de prueba.
+- **2026-11-08:** documentación actualizada para T4 (`AGENTS.md`, `CLAUDE.md`, `specs/03-pos-spec.md` §14, `04-store-spec.md` §3.11, `11-api-contracts.md` §10, `00-bootstrap.sql`, `01-master-spec.md`, `ARCHITECTURE.md`, `12-roadmap.md`, `13-testing-model.md`, `hallazgos-tienda.md` v6 y los skills `kubit-store` y `kubit-pos`).

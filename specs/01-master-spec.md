@@ -49,6 +49,7 @@ Para mantener la integridad del proyecto, se establecen las siguientes reglas:
 - `/specs/15-store-pedido-seguro.sql` — Tienda T2: `st_crear_pedido`, numero de pedido, `st_direcciones.email`
 - `/specs/16-store-cerrar-acceso-anon.sql` — Tienda T2: sin acceso `anon` a pedidos, detalle y direcciones
 - `/specs/17-store-checkout-coherente.sql` — Tienda T3b: configuracion, zonas de envio, `medio_pago_web`, `st_crear_pedido` v2
+- `/specs/18-pos-pedidos-web.sql` — POS T4: columnas de gestion en `st_pedidos` y funciones `pos_pedido*_web_*` (pedidos web en el POS)
 - `/specs/07-wms-spec.md` y `/specs/08-wms-schema.sql` — Modulo WMS
 - `/specs/ARCHITECTURE.md` — Estructura de directorios
 
@@ -56,7 +57,7 @@ Para mantener la integridad del proyecto, se establecen las siguientes reglas:
 - `/AGENTS.md` — Memoria persistente del proyecto
 - `/CLAUDE.md` — Copia de AGENTS.md (compatibilidad Claude Code)
 - `/CONTEXT.md` — Glosario de dominio del proyecto
-- `/tests/` — Tests del POS (Vitest, `*.test.js`) y de la tienda (`tests/store/*.test.mjs`, `node --test`)
+- `/tests/` — Tests del POS (Vitest, `*.test.js`), de pedidos web del POS (`tests/pos/*.test.mjs`, `node --test`) y de la tienda (`tests/store/*.test.mjs`, `node --test`)
 
 ### 6.3 Apps
 - `/apps/pos/` — Modulo POS (Punto de Venta)

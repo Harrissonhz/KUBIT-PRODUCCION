@@ -924,3 +924,78 @@ update public.st_tarifas_envio set valor = 16000, dias_min = 1, dias_max = 2, up
 insert into public.st_destinos_envio (zona, departamento, ciudad) values ('local', 'Antioquia', 'Rionegro');
 ```
 Claves de `st_configuracion`: `envio_gratis_desde`, `pedido_minimo`, `envio_zona_defecto`, `bre_b_llave`, `bre_b_titular`, `bre_b_qr_url`, `mercado_pago_link`, `whatsapp`. Las tablas no están abiertas a `anon` ni a `authenticated` (no hay pantalla de edición; ver ST-31).
+
+## 10. RPC del POS para Pedidos Web (vigente desde T4)
+
+Llamadas hechas por un usuario del POS con sesión (rol `authenticated`): `POST {{SUPABASE_URL}}/rest/v1/rpc/<funcion>` con `apikey: {{SUPABASE_ANON_KEY}}` y `Authorization: Bearer {{JWT_TOKEN}}` (token del login). En el código: `DB.pedidosWeb.*` (`apps/pos/js/compartido/database.js`), que usa `__supabase.rpc(nombre, params)`. Script: `specs/18-pos-pedidos-web.sql`.
+
+**Permisos:** `EXECUTE` solo para `authenticated`; `anon` no ejecuta ninguna. Cada función exige que la sesión corresponda a un usuario **activo** de `pos_usuarios` (`pos_usuario_sesion()`: mismo `id` que `auth.users`, respaldo por correo). Sin sesión del POS responden `[POS_SESION]`. Las funciones internas `pos_usuario_sesion()` y `pos_pedido_web_json(uuid)` no son ejecutables por `anon` ni `authenticated`.
+
+### 10.1 `pos_pedidos_web_contar`
+```
+POST /rest/v1/rpc/pos_pedidos_web_contar
+{}
+```
+**Response:** un entero con la cantidad de pedidos `PENDIENTE` (no borrados). `DB.pedidosWeb.contar()` → `{ data: n, error }`.
+
+### 10.2 `pos_pedidos_web_listar`
+```
+POST /rest/v1/rpc/pos_pedidos_web_listar
+{ "p_vista": "pendientes" }
+```
+- `p_vista`: `pendientes` (estado `PENDIENTE`, los más antiguos primero) o `gestionados` (con `gestionado_at` en los últimos 30 días, los más recientes primero). Máximo 200 pedidos. Otro valor → `[POS_VISTA]`.
+- **Response:** arreglo de pedidos (formato de 10.5). `DB.pedidosWeb.listar(vista)` → `{ data: [...], error }`.
+
+### 10.3 `pos_pedido_web_detalle`
+```
+POST /rest/v1/rpc/pos_pedido_web_detalle
+{ "p_pedido_id": "uuid-del-pedido" }
+```
+**Response:** un pedido (formato de 10.5). Si no existe → `[POS_PEDIDO]`.
+
+### 10.4 `pos_pedido_web_cerrar`
+```
+POST /rest/v1/rpc/pos_pedido_web_cerrar
+{
+  "p_pedido_id": "uuid-del-pedido",
+  "p_resultado": "venta",
+  "p_numero_venta": "KBT-000123",
+  "p_nota": "lo pidio para el viernes"
+}
+```
+- `p_resultado`: `venta` → estado `CONFIRMADO`; `no_concretado` → estado `CANCELADO`. Obligatorio; no hay motivo.
+- `p_numero_venta`: opcional y solo con `venta`. Se busca (sin distinguir mayúsculas) en `pos_ventas.numero_venta` entre las ventas no borradas y no anuladas; si existe se guarda su `id` en `st_pedidos.venta_id`. Si la venta ya está enlazada a otro pedido → `[POS_VENTA]`.
+- `p_nota`: opcional, máximo 500 caracteres.
+- Solo se cierran pedidos `PENDIENTE` (se bloquea la fila con `for update`). Efectos: `estado`, `gestionado_at = now()`, `gestionado_por` (usuario del POS), `nota_gestion`, `venta_id` (si hubo número de venta), `updated_by`, `updated_at`. **No** toca inventario, ventas, clientes ni la tienda.
+- **Response:** el pedido ya cerrado (formato de 10.5). `DB.pedidosWeb.cerrar(id, resultado, numeroVenta, nota)` → `{ data, error, codigo }`.
+
+### 10.5 Formato del pedido
+```json
+{
+  "id": "uuid", "numero_pedido": "KBT-202611-000010", "created_at": "2026-11-08T15:00:00Z",
+  "estado": "PENDIENTE", "subtotal": 300000, "costo_envio": 0, "total": 300000,
+  "medio_pago": "transferencia",
+  "notas": "Medio de pago: transferencia | Envio: Valle de Aburra (gratis) | Stock insuficiente: AL033 (pedido 20, disponible 1)",
+  "stock_insuficiente": true, "aviso_stock": "AL033 (pedido 20, disponible 1)",
+  "gestionado_at": null, "gestionado_por": null, "nota_gestion": null,
+  "venta_id": null, "numero_venta": null,
+  "comprador": { "nombre": "Ana Gomez", "celular": "3001234567", "email": null,
+                 "direccion": "Calle 1 # 2-3", "ciudad": "Itagui", "departamento": "Antioquia" },
+  "lineas": [ { "producto_detalle_id": "uuid", "codigo": "AL033", "nombre": "...", "atributos": { },
+                "cantidad": 20, "precio_unitario": 15000, "total": 300000, "stock_actual": 1 } ]
+}
+```
+- `medio_pago` sale de `st_pedidos.medio_pago_web` (respaldo: el medio escrito en `notas`). `email` es `null` si el comprador no lo dio. `gestionado_por` es el nombre del usuario que cerró el pedido. `stock_actual` es el stock de hoy de la variante.
+
+### 10.6 Errores
+`message` con prefijo `[POS_xxx]` (HTTP 400, `code: P0001`). `DB.pedidosWeb` los devuelve como `{ error: "<texto sin prefijo>", codigo: "POS_xxx" }`; un error técnico se convierte en un mensaje genérico (`codigo: null`) y un 401/JWT vencido lleva al login.
+
+| Prefijo | Causa |
+|---|---|
+| `[POS_SESION]` | No hay sesión de un usuario activo del POS |
+| `[POS_VISTA]` | `p_vista` no es `pendientes` ni `gestionados` |
+| `[POS_PEDIDO]` | El pedido no existe |
+| `[POS_YA_GESTIONADO]` | El pedido ya no está `PENDIENTE` |
+| `[POS_RESULTADO]` | `p_resultado` no es `venta` ni `no_concretado` |
+| `[POS_NOTA]` | La nota supera 500 caracteres |
+| `[POS_VENTA]` | Número de venta con un resultado que no es `venta`, venta inexistente o anulada, o ya enlazada a otro pedido |
