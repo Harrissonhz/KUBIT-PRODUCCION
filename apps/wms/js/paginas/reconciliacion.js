@@ -13,10 +13,11 @@
      3. Diferencia por producto: POS, WMS y "POS − WMS". Causa y accion:
         a) tiene una salida pendiente (ajuste − / merma)  -> Bajas y ajustes
         b) tiene otro movimiento del POS sin procesar     -> se muestra el motivo
-        c) POS > WMS sin movimiento que lo explique        -> causa frecuente:
-           venta anulada (D2); hoy no se iguala desde el WMS (T-521)
+        c) POS > WMS sin movimiento que lo explique        -> cambio directo
+           del stock en el POS (las anulaciones de venta ya las procesa el WMS)
         d) WMS > POS sin movimiento que lo explique        -> cambio directo
-           del stock en el POS; hoy no se iguala desde el WMS (T-521)
+           del stock en el POS
+           En c) y d) el WMS no se iguala solo: la diferencia es la alarma (T-521 no se hace)
      4. Sobrantes de conteo: no generan diferencia (el WMS no los crea,
         CR3); se listan para registrar el ajuste + en el POS.
    Fechas con WMSFecha (America/Bogota, Z1).
@@ -151,11 +152,11 @@
     }
     if (pos > wms) {
       return { clase: 'rojo',
-        texto: 'El POS tiene ' + plural(n, 'unidad', 'unidades') + ' mas, sin un movimiento que lo explique. Causa frecuente: una venta anulada en el POS (pendiente D2) o un cambio directo del stock en el POS. Hoy el WMS no puede igualarse por si solo (T-521).',
+        texto: 'El POS tiene ' + plural(n, 'unidad', 'unidades') + ' mas, sin un movimiento que lo explique. Causa frecuente: un cambio directo del stock en el POS sin registrar ajuste. Las anulaciones de venta ya las procesa el WMS. El WMS no se iguala por si solo: esta diferencia es una alarma para revisar.',
         accion: '' };
     }
     return { clase: 'rojo',
-      texto: 'El WMS tiene ' + plural(n, 'unidad', 'unidades') + ' mas, sin un movimiento del POS que lo explique. Causa frecuente: el stock se cambio directamente en el POS sin registrar ajuste. Hoy el WMS no puede igualarse por si solo (T-521).',
+      texto: 'El WMS tiene ' + plural(n, 'unidad', 'unidades') + ' mas, sin un movimiento del POS que lo explique. Causa frecuente: el stock se cambio directamente en el POS sin registrar ajuste. El WMS no se iguala por si solo: esta diferencia es una alarma para revisar.',
       accion: '' };
   }
 
@@ -234,7 +235,7 @@
       var noSop = o.accion_wms === 'NO_SOPORTADO';
       var motivo = motivos[o.pos_movimiento_id];
       var explica = noSop
-        ? 'El WMS aun no procesa este tipo de movimiento (anulaciones, D2). Puede generar una diferencia con el POS.'
+        ? 'El WMS no procesa este tipo de movimiento del POS (devoluciones al proveedor y transferencias). Puede generar una diferencia con el POS.'
         : (motivo || 'No se pudo procesar. Toca Actualizar para ver el motivo.');
       return tarjeta(noSop ? 'ambar' : 'rojo',
         '<div class="flex items-start justify-between gap-3">' +

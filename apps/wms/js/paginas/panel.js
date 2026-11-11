@@ -11,8 +11,8 @@
            venta mas antigua (DB.wms.bandejaDespacho, regla R-B1).
         c) Diferencias con el POS: SKUs con diferencia (wms_v_reconciliacion).
         d) Movimientos del POS pendientes (wms_v_pos_pendientes):
-           los que fallaron al sincronizar y los NO_SOPORTADOS
-           (anulaciones, decision D2).
+           los que fallaron al sincronizar (las anulaciones de venta las procesa el WMS
+           desde W1) y los NO_SOPORTADOS (devoluciones al proveedor y transferencias).
      3. Cada tarjeta enlaza a su pantalla. Cada una maneja su propio
         error sin afectar a las demas.
    C3: "Diferencias" enlaza a Reconciliacion; "Movimientos pendientes"
@@ -233,7 +233,7 @@
           (fallidos.length > MAX_LISTA ? '<p class="text-xs text-slate-500 dark:text-slate-400">y ' + (fallidos.length - MAX_LISTA) + ' mas</p>' : '')
         : '') +
       (noSoportados.length
-        ? '<p class="mt-2 text-xs font-medium text-amber-800 dark:text-amber-300">' + plural(noSoportados.length, 'movimiento sin soporte todavia', 'movimientos sin soporte todavia') + ' (anulaciones, D2)</p>' +
+        ? '<p class="mt-2 text-xs font-medium text-amber-800 dark:text-amber-300">' + plural(noSoportados.length, 'movimiento sin soporte todavia', 'movimientos sin soporte todavia') + ' (devoluciones al proveedor y transferencias del POS)</p>' +
           '<ul class="mt-1 divide-y divide-amber-200/70 dark:divide-amber-800/40">' + noSoportados.slice(0, MAX_LISTA).map(function (f) { return item(f, false); }).join('') + '</ul>' +
           (noSoportados.length > MAX_LISTA ? '<p class="text-xs text-slate-500 dark:text-slate-400">y ' + (noSoportados.length - MAX_LISTA) + ' mas</p>' : '')
         : '') +
